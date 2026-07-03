@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version:6.2
 import PackageDescription
 
 let package = Package(
@@ -15,12 +15,22 @@ let package = Package(
     targets: [
         .target(
             name: "AppUpdater",
-            path: "Sources/AppUpdater"
+            path: "Sources/AppUpdater",
+            exclude: ["README.md"],
+            swiftSettings: [
+                .enableUpcomingFeature("NonisolatedNonsendingByDefault")
+            ]
         ),
         .testTarget(
             name: "AppUpdaterTests",
             dependencies: ["AppUpdater"],
-            path: "Tests/AppUpdaterTests"
+            path: "Tests/AppUpdaterTests",
+            resources: [
+                .copy("Fixtures")
+            ],
+            swiftSettings: [
+                .enableUpcomingFeature("NonisolatedNonsendingByDefault")
+            ]
         )
     ]
 )
