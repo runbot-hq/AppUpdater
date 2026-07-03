@@ -3,6 +3,18 @@
 A Swift library that drives an in-app auto-update flow for macOS apps
 distributed via GitHub Releases outside the Mac App Store.
 
+**Platform & Stack**
+
+![macOS 26+](https://img.shields.io/badge/macOS-26%2B-black?logo=apple&logoColor=white)
+![Swift 6.2](https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white)
+![SPM](https://img.shields.io/badge/SPM-compatible-F05138?logo=swift&logoColor=white)
+
+**CI Checks**
+
+![Unit Tests](https://github.com/runbot-hq/AppUpdater/actions/workflows/swift-test.yml/badge.svg)
+![SwiftLint](https://github.com/runbot-hq/AppUpdater/actions/workflows/swiftlint.yml/badge.svg)
+![Periphery](https://github.com/runbot-hq/AppUpdater/actions/workflows/periphery.yml/badge.svg)
+
 ## Features
 
 - 🔓 **No Apple Developer account required** — works with unsigned and ad-hoc signed apps; SHA-256 sidecar provides integrity without code signing
