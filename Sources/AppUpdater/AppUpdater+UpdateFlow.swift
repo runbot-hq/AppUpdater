@@ -79,6 +79,15 @@ extension AppUpdater {
         // cycle. The correct zip is downloaded and installed. One stale
         // session, then correct. Not a permanent downgrade.
         //
+        // YANKED RELEASE: if a release is yanked from GitHub after the zip is
+        // cached but before the user taps Install, the cached zip will still be
+        // served as .ready and the user may install the yanked binary. Closing
+        // this gap would require a live GitHub re-validation call at install
+        // time — adding a network dependency to a step that is currently fully
+        // offline. This is over-engineering for the current use case (RunBot
+        // has no yank/recall mechanism and has never yanked a release).
+        // Tracked in issue #2 with full rationale and a proposed fix.
+        //
         // PARTIAL WRITE: if a prior download was interrupted mid-move, a
         // partial file may sit at fixedZipURL. fileExists returns true,
         // .ready is applied, ditto fails in installAndRelaunch, .failed is
@@ -135,6 +144,10 @@ extension AppUpdater {
         //   which requires reset paths, which requires lifecycle management.
         // The .downloading phase applied inside downloadUpdate IS the
         // in-flight signal. That is sufficient.
+        //
+        // Task(name:) is standard Swift 6.2 (SE-0469). The name is surfaced
+        // in Instruments and the Swift concurrency debugger for triage.
+        // REVIEWER: do not remove the name: parameter — it is not custom API.
         Task(name: "AppUpdater.download") {
             await self.downloadUpdate(
                 from: downloadURL,
