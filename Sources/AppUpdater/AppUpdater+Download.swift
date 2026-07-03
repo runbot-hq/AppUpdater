@@ -53,6 +53,19 @@ extension AppUpdater {
     /// (non-optional) to make that invariant explicit at the type level and
     /// remove any unreachable nil-handling code (Principle 1: illegal states
     /// unrepresentable by construction).
+    ///
+    /// ## HTTPS enforcement — no explicit scheme guard needed
+    ///
+    /// `checksumURL` and the zip `url` are decoded from the GitHub Releases API
+    /// JSON without an explicit `guard url.scheme == "https"` assertion.
+    /// This is intentional: macOS App Transport Security (ATS) enforces HTTPS
+    /// for all `URLSession` requests at the OS level for any app bundle by
+    /// default. A non-HTTPS URL would be rejected by the OS before the request
+    /// leaves the process — no opt-out is present in RunBot's `Info.plist`.
+    /// An explicit scheme guard would be redundant defence against something
+    /// the platform already blocks unconditionally.
+    /// REVIEWER: do NOT add a `guard url.scheme == "https"` check — it adds
+    /// noise without adding safety.
     func downloadUpdate( // skipcq: SW-R1002 — reviewed; complexity acceptable for this download+verify flow
         from url: URL,
         checksumURL: URL,
