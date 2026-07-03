@@ -14,6 +14,7 @@ distributed via GitHub Releases outside the Mac App Store.
 ![Unit Tests](https://github.com/runbot-hq/AppUpdater/actions/workflows/swift-test.yml/badge.svg)
 ![SwiftLint](https://github.com/runbot-hq/AppUpdater/actions/workflows/swiftlint.yml/badge.svg)
 ![Periphery](https://github.com/runbot-hq/AppUpdater/actions/workflows/periphery.yml/badge.svg)
+[![Greptile](https://img.shields.io/badge/🦎%20AI%20Review-Greptile-6C47FF?logoColor=white)](https://greptile.com)
 
 ## Features
 
