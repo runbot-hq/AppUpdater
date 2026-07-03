@@ -27,7 +27,7 @@ distributed via GitHub Releases outside the Mac App Store.
 - 💾 **Deterministic cache** — zip cached at `~/Library/Caches/<schedulerIdentifier>/update.zip`; no accumulating old downloads
 - ⏰ **Background scheduling** — uses `NSBackgroundActivityScheduler` with power coalescing; default 24-hour interval
 - 🎨 **Bring-your-own UI** — host app owns all update state via `UpdateStateProviding`; surfaces it however it likes
-- 🏝️ **`@MainActor` isolated** — race-free by design; blocking work runs off the main thread
+- 🏕️ **`@MainActor` isolated** — race-free by design; blocking work runs off the main thread
 
 ## Installation
 
@@ -144,6 +144,27 @@ Mutate before calling `scheduleBackgroundCheck` if you need a different cadence.
 ## Distribution assumptions
 
 The SHA-256 sidecar must be named exactly `<assetName>.sha256` — i.e. if `assetName` returns `"YourApp.zip"`, the expected sidecar is `"YourApp.zip.sha256"`. A file named `"YourApp.sha256"` or `"YourApp.zip.sha256sum"` will not be found and the download will be skipped.
+
+The sidecar must contain a single line in `shasum -a 256` format:
+
+```
+<hex-digest>  YourApp.zip
+```
+
+Note the two spaces between digest and filename — this is standard `shasum` output and what `verifyChecksum` parses.
+
+**Generating the sidecar at release time:**
+
+```bash
+/usr/bin/shasum -a 256 YourApp.zip > YourApp.zip.sha256
+```
+
+Then upload both `YourApp.zip` and `YourApp.zip.sha256` as assets on the GitHub Release. If you use a `publish.yml` workflow, add a dedicated step before `gh release create`:
+
+```yaml
+- name: Generate SHA-256 sidecar
+  run: /usr/bin/shasum -a 256 YourApp.zip > YourApp.zip.sha256
+```
 
 ## Trust model
 
