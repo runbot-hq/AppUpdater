@@ -9,7 +9,7 @@ distributed via GitHub Releases outside the Mac App Store.
 ![Swift 6.2](https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white)
 ![SPM](https://img.shields.io/badge/SPM-compatible-F05138?logo=swift&logoColor=white)
 
-**CI Checks**
+**CI Checks & Review**
 
 ![Unit Tests](https://github.com/runbot-hq/AppUpdater/actions/workflows/swift-test.yml/badge.svg)
 ![SwiftLint](https://github.com/runbot-hq/AppUpdater/actions/workflows/swiftlint.yml/badge.svg)
