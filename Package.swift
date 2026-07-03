@@ -16,7 +16,6 @@ let package = Package(
         .target(
             name: "AppUpdater",
             path: "Sources/AppUpdater",
-            exclude: ["README.md"],
             swiftSettings: [
                 .enableUpcomingFeature("NonisolatedNonsendingByDefault")
             ]
