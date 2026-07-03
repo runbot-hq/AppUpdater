@@ -5,16 +5,16 @@ distributed via GitHub Releases outside the Mac App Store.
 
 ## Features
 
-- **No Apple Developer account required** — works with unsigned and ad-hoc signed apps; SHA-256 sidecar provides integrity without code signing
-- **Gatekeeper-free distribution** — curl-based install and in-app updates both bypass quarantine; no signing at update time, the replacement bundle runs trusted as-is
-- **GitHub Releases polling** — polls for new releases using the GitHub API; supports stable and `beta.N` pre-release channels
-- **Semver comparison** — full semver ordering including `beta.N` suffixes; beta-to-beta and beta-to-stable promotion both work correctly
-- **SHA-256 integrity verification** — verifies the downloaded zip against a `.sha256` sidecar asset before install
-- **Optional code-sign validation** — verifies the downloaded bundle matches the running bundle's Developer ID identity
-- **Deterministic cache** — zip cached at `~/Library/Caches/<schedulerIdentifier>/update.zip`; no accumulating old downloads
-- **Background scheduling** — uses `NSBackgroundActivityScheduler` with power coalescing; default 24-hour interval
-- **Bring-your-own UI** — host app owns all update state via `UpdateStateProviding`; surfaces it however it likes
-- **`@MainActor` isolated** — race-free by design; blocking work runs off the main thread
+- 🔓 **No Apple Developer account required** — works with unsigned and ad-hoc signed apps; SHA-256 sidecar provides integrity without code signing
+- 🛡️ **Gatekeeper-free distribution** — curl-based install and in-app updates both bypass quarantine; no signing at update time, the replacement bundle runs trusted as-is
+- 🔍 **GitHub Releases polling** — polls for new releases using the GitHub API; supports stable and `beta.N` pre-release channels
+- 🔢 **Semver comparison** — full semver ordering including `beta.N` suffixes; beta-to-beta and beta-to-stable promotion both work correctly
+- ✅ **SHA-256 integrity verification** — verifies the downloaded zip against a `.sha256` sidecar asset before install
+- 🔏 **Optional code-sign validation** — verifies the downloaded bundle matches the running bundle's Developer ID identity
+- 💾 **Deterministic cache** — zip cached at `~/Library/Caches/<schedulerIdentifier>/update.zip`; no accumulating old downloads
+- ⏰ **Background scheduling** — uses `NSBackgroundActivityScheduler` with power coalescing; default 24-hour interval
+- 🎨 **Bring-your-own UI** — host app owns all update state via `UpdateStateProviding`; surfaces it however it likes
+- 🏝️ **`@MainActor` isolated** — race-free by design; blocking work runs off the main thread
 
 ## Installation
 
