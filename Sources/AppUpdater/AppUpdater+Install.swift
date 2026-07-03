@@ -137,8 +137,18 @@ extension AppUpdater {
         // REVIEWER: this is why a stale or partial zip cannot leave the user with
         // a broken installation — the swap either fully succeeds or fully rolls
         // back. Do NOT replace this with removeItem + copyItem (not atomic).
+        //
+        // replaceItemAt returns the actual post-swap URL (the path where the new
+        // bundle landed). We capture it and use it for open -n below rather than
+        // re-using bundleURL. In practice on a standard macOS /Applications setup
+        // the returned URL is identical to bundleURL — same name, same path. In
+        // edge cases (case-insensitive FS conflict, path rewriting) they may
+        // differ; using the returned URL ensures open -n launches the new binary
+        // rather than the old one. Falls back to bundleURL if nil is returned.
+        // Fixes issue #3.
+        let finalURL: URL
         do {
-            _ = try fm.replaceItemAt(bundleURL, withItemAt: appInZip)
+            finalURL = (try fm.replaceItemAt(bundleURL, withItemAt: appInZip)) ?? bundleURL
         } catch {
             appUpdaterLogger.error("replaceItem failed: \(String(describing: error), privacy: .public)")
             isInstalling = false
@@ -154,7 +164,7 @@ extension AppUpdater {
         #if canImport(AppKit)
         let relaunchTask = Process()
         relaunchTask.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        relaunchTask.arguments = ["-n", bundleURL.path]
+        relaunchTask.arguments = ["-n", finalURL.path]
         do {
             try relaunchTask.run()
         } catch {
