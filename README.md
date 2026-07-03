@@ -6,6 +6,7 @@ distributed via GitHub Releases outside the Mac App Store.
 ## Features
 
 - **No Apple Developer account required** — works with unsigned and ad-hoc signed apps; SHA-256 sidecar provides integrity without code signing
+- **Gatekeeper-free distribution** — curl-based install and in-app updates both bypass quarantine; no signing at update time, the replacement bundle runs trusted as-is
 - **GitHub Releases polling** — polls for new releases using the GitHub API; supports stable and `beta.N` pre-release channels
 - **Semver comparison** — full semver ordering including `beta.N` suffixes; beta-to-beta and beta-to-stable promotion both work correctly
 - **SHA-256 integrity verification** — verifies the downloaded zip against a `.sha256` sidecar asset before install
