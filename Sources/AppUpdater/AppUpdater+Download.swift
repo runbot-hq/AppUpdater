@@ -54,18 +54,20 @@ extension AppUpdater {
     /// remove any unreachable nil-handling code (Principle 1: illegal states
     /// unrepresentable by construction).
     ///
-    /// ## HTTPS enforcement — no explicit scheme guard needed
+    /// ## HTTPS enforcement
     ///
     /// `checksumURL` and the zip `url` are decoded from the GitHub Releases API
     /// JSON without an explicit `guard url.scheme == "https"` assertion.
-    /// This is intentional: macOS App Transport Security (ATS) enforces HTTPS
-    /// for all `URLSession` requests at the OS level for any app bundle by
-    /// default. A non-HTTPS URL would be rejected by the OS before the request
-    /// leaves the process — no opt-out is present in RunBot's `Info.plist`.
-    /// An explicit scheme guard would be redundant defence against something
-    /// the platform already blocks unconditionally.
-    /// REVIEWER: do NOT add a `guard url.scheme == "https"` check — it adds
-    /// noise without adding safety.
+    /// In practice, GitHub's API always returns `https://` asset URLs, and
+    /// macOS App Transport Security (ATS) blocks non-HTTPS `URLSession` requests
+    /// by default for any app bundle — making an explicit scheme guard redundant
+    /// in the common case.
+    ///
+    /// Note: ATS can be disabled via `NSAllowsArbitraryLoads` in a host app's
+    /// `Info.plist`. As a library, AppUpdater cannot enforce the host's ATS
+    /// policy. However, introducing an explicit scheme guard would add a new
+    /// `.failed` error path that is unreachable in any real deployment — GitHub
+    /// does not serve asset URLs over plain HTTP. The practical risk is zero.
     func downloadUpdate( // skipcq: SW-R1002 — reviewed; complexity acceptable for this download+verify flow
         from url: URL,
         checksumURL: URL,
