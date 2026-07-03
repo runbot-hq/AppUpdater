@@ -95,7 +95,29 @@ extension AppUpdater {
     // MARK: - Private helpers
 
     /// Unzips `zipURL` into `tmpDir` via `/usr/bin/ditto` and returns the
-    /// `.app` bundle URL found at the archive root.
+    /// first `.app` bundle found at the archive root, or `nil` on any failure.
+    ///
+    /// ## Single-.app contract
+    ///
+    /// This function picks the **first** `.app` entry at the zip root via
+    /// `first(where: { $0.pathExtension == "app" })`. It does NOT assert that
+    /// exactly one `.app` exists, and that is intentional.
+    ///
+    /// AppUpdater is a library — it is not a zip validator. The contract for
+    /// consumers is: **package exactly one `.app` bundle at the zip root.**
+    /// If a consumer ships a zip with multiple `.app` bundles, that is a
+    /// packaging error on their side. AppUpdater will silently pick the first
+    /// one in filesystem order (undefined). The consequence — installing the
+    /// wrong bundle — is the consumer's responsibility, not ours.
+    ///
+    /// A `count == 1` guard was considered and rejected:
+    /// - It adds complexity and a new `.failed` path for an error that should
+    ///   never exist in a correctly configured consumer.
+    /// - It would produce a confusing `.failed` state with no message pointing
+    ///   at the real cause (bad packaging), making it harder to debug.
+    /// - Principle 4: no sprawl for edge cases that are consumer errors.
+    ///
+    /// REVIEWER: do NOT add a uniqueness assertion here.
     private func unzipAndLocateApp(zipURL: URL, into tmpDir: URL) async -> URL? {
         let fm = FileManager.default
         do {
