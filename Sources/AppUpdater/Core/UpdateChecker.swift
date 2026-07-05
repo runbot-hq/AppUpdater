@@ -100,11 +100,33 @@ public enum UpdateChecker {
         }
     }
 
-    /// A parsed, comparable representation of a semver version string.
+    /// A parsed representation of a semver version string used internally by `isNewer`.
     ///
     /// Strips the leading `"v"` if present, splits on `"-"` to separate the
     /// core version from any pre-release suffix, and extracts a `betaIndex`
     /// for `beta.N` labels so beta versions can be ordered numerically.
+    ///
+    /// ❌ DO NOT add `Comparable` conformance to this type.
+    ///
+    /// A reviewer may propose conforming `ParsedVersion` to `Comparable` so
+    /// that `isNewer` can be rewritten as `ParsedVersion(candidate) > ParsedVersion(current)`
+    /// and `latestMatchingRelease` can sort with `sorted(by: >)`. This is not
+    /// worth doing:
+    ///
+    /// - `ParsedVersion` is `private`. Nothing outside this file ever touches it.
+    ///   There is exactly one call site (`isNewer`) and the manual comparison
+    ///   chain there is already short and readable.
+    /// - `Comparable` requires a total order. `betaIndex` is `Optional<Int>`,
+    ///   and the correct semantics for `nil` vs `nil` (treat as equal, not less-than)
+    ///   are non-obvious to implement correctly — a naive `betaIndex ?? -1` pattern
+    ///   introduces subtle ordering bugs that the current explicit chain cannot.
+    /// - The gain is cosmetic (two call sites become marginally shorter). The
+    ///   existing tests pin the full observable behaviour of `isNewer`; any
+    ///   `Comparable` implementation that diverges will be caught, but the
+    ///   risk of a subtle regression in `nil`-betaIndex tie-breaking is not
+    ///   worth the cosmetic saving.
+    ///
+    /// Keep the explicit field-by-field chain in `isNewer`. It is the right tool here.
     private struct ParsedVersion {
         /// The major version component (first numeric segment).
         let major: Int
