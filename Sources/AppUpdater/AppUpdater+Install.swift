@@ -55,6 +55,18 @@ extension AppUpdater {
             return
         }
 
+        // ⚠️ skipCodeSignValidation is true — code-sign identity check is disabled.
+        // Install will proceed on SHA-256 integrity alone.
+        //
+        // This is the correct default for RunBot's unsigned distribution model.
+        // If you are shipping a signed app and see this warning in Console.app,
+        // set `skipCodeSignValidation = false` on your AppUpdater instance so
+        // that the installed bundle's signing identity is verified against the
+        // running bundle before the swap.
+        if skipCodeSignValidation {
+            appUpdaterLogger.warning("skipCodeSignValidation is true — code-sign identity check is disabled; install proceeds on SHA-256 integrity alone")
+        }
+
         let zipURL = fixedZipURL
         let bundleURL = URL(fileURLWithPath: Bundle.main.bundlePath)
         let tmpDir = FileManager.default.temporaryDirectory
@@ -179,10 +191,10 @@ extension AppUpdater {
             return
         }
 
-        // ── Step 2: clean up scratch dir ─────────────────────────────────────
+        // ── Step 2: clean up scratch dir ────────────────────────────────────
         try? fm.removeItem(at: tmpDir)
 
-        // ── Step 3: relaunch ───────────────────────────────────────────────────
+        // ── Step 3: relaunch ──────────────────────────────────────────────────
         #if canImport(AppKit)
         let relaunchTask = Process()
         relaunchTask.executableURL = URL(fileURLWithPath: "/usr/bin/open")
@@ -200,7 +212,7 @@ extension AppUpdater {
             return
         }
 
-        // ── Step 4: delete zip (relaunch confirmed) ──────────────────────────
+        // ── Step 4: delete zip (relaunch confirmed) ───────────────────────────
         try? fm.removeItem(at: zipURL)
 
         // ── Step 5: terminate ────────────────────────────────────────────────
