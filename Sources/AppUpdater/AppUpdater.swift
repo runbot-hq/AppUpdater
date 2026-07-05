@@ -133,15 +133,34 @@ public final class AppUpdater {
 
     /// How often `NSBackgroundActivityScheduler` fires a background update check.
     ///
-    /// - **Release:** 24 hours.
-    /// - **DEBUG:** 60 seconds, overridable per-test.
+    /// - **Release:** 24 hours (immutable `let`).
+    /// - **DEBUG:** 60 seconds, overridable per-test via mutation.
     #if DEBUG
-    /// 60-second interval used in DEBUG builds. Override in test setUp for faster
-    /// QA cycles. **Always reset in tearDown** — Swift Testing runs tests
+    /// 60-second interval used in DEBUG builds. Override in test `setUp` for faster
+    /// QA cycles. **Always reset in `tearDown`** — Swift Testing runs tests
     /// concurrently by default and concurrent mutations of this static are a data race.
     ///
-    /// `nonisolated(unsafe)` — written once in test setUp before any scheduler
-    /// is constructed; no concurrent mutation path exists in practice.
+    /// ## ⚠️ Known data race — accepted, test-only, deferred (issue #14)
+    ///
+    /// `nonisolated(unsafe) public static var` is technically a data race under
+    /// strict Swift 6 concurrency when tests run in parallel. This is understood
+    /// and accepted under the following rationale:
+    ///
+    /// - **Scope is tests only.** This static is never mutated in production
+    ///   code. The race window is purely a test-setup concern and cannot cause
+    ///   a production crash or incorrect behaviour in a running app.
+    /// - **Mutation pattern is controlled.** The intended usage is:
+    ///   write once in `setUp` before any scheduler is constructed, read
+    ///   during scheduler setup, reset in `tearDown`. No concurrent writer
+    ///   exists when the protocol is followed.
+    /// - **Fix is known but deferred.** The correct long-term fix is
+    ///   constructor injection (`checkInterval: TimeInterval = 24 * 60 * 60`)
+    ///   so each test instance is isolated without `tearDown` discipline.
+    ///   That requires an API change and is tracked in issue #14.
+    ///   It will be addressed in a future refactor when the API surface is
+    ///   revisited. Do not "fix" this by adding a lock or actor wrapper —
+    ///   that adds complexity for a test-only problem that is resolved more
+    ///   cleanly at the init level.
     nonisolated(unsafe) public static var checkInterval: TimeInterval = 60
     #else
     /// 24-hour interval used in release builds.
