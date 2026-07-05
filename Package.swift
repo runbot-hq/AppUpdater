@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "AppUpdater",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v26)
     ],
     products: [
         .library(
