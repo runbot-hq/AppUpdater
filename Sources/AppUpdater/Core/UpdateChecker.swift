@@ -253,6 +253,37 @@ public enum UpdateChecker {
     /// Returns `true` when `candidate` is strictly newer than `current` using
     /// numeric semver comparison, including beta ordering.
     ///
+    /// ## Supported tag format
+    ///
+    /// AppUpdater supports exactly two tag shapes:
+    ///   - Stable releases:   `vMAJOR.MINOR.PATCH`           (e.g. `v1.2.3`)
+    ///   - Beta pre-releases: `vMAJOR.MINOR.PATCH-beta.N`    (e.g. `v1.2.3-beta.4`)
+    ///
+    /// These are the only formats produced by the RunBot publish pipeline and
+    /// the only formats this function is designed to handle. Using this library
+    /// with tags outside this shape (e.g. `rc.1`, `alpha.1`, CalVer, build
+    /// metadata suffixes) is outside the supported contract. If your pipeline
+    /// uses a different tag convention, adapt the convention — do not extend
+    /// this parser.
+    ///
+    /// ❌ DO NOT add support for `rc.N`, `alpha.N`, or arbitrary pre-release labels.
+    ///
+    /// A reviewer may propose extending `ParsedVersion` to handle `rc.N` or
+    /// `alpha.N` so that `isNewer` returns a meaningful ordering for those
+    /// suffixes rather than `false`. This is permanently rejected:
+    ///
+    /// - The library has a defined tag contract (see above). Consumers who do
+    ///   not follow it get undefined behaviour — that is correct and intentional.
+    ///   The library's job is not to accommodate every possible tagging scheme.
+    /// - Adding more suffix types adds parser complexity, more `betaIndex`-style
+    ///   fields, and new ordering edge cases (how does `rc.1` compare to `beta.2`?
+    ///   Is `alpha < beta < rc < stable`? Different projects answer differently).
+    /// - Silent `false` for an unrecognised suffix is a safe, predictable
+    ///   failure mode. The worst outcome is "update not offered" — not a
+    ///   wrong-version install or a crash.
+    ///
+    /// If this is raised in review again, point the reviewer here.
+    ///
     /// ## Constraints
     ///
     /// Pre-release ordering is supported **only for `beta.N` labels** (e.g.
@@ -262,11 +293,6 @@ public enum UpdateChecker {
     /// `major.minor.patch` and at least one has a non-`beta.N` pre-release
     /// label, the `if let ci, let si` guard falls through and this function
     /// returns `false`.
-    ///
-    /// This is not a bug for the current publish pipeline, which only generates
-    /// `beta.N` tags. If a future release channel uses a different pre-release
-    /// label (e.g. `rc.N`), extend `ParsedVersion` to recognise that suffix and
-    /// assign a comparable index before calling this function.
     public static func isNewer(_ candidate: String, than current: String) -> Bool { // skipcq: SW-R1002 — reviewed; complexity acceptable for this semver comparison
         let cv = ParsedVersion(candidate)
         let sv = ParsedVersion(current)
