@@ -101,6 +101,43 @@ extension AppUpdater {
         //
         // A version sidecar would add persistent state for edge cases that
         // self-heal in one cycle — Principle 4 says no. See issue #1859.
+        //
+        // ❌ DO NOT encode the version into the zip filename (e.g. update-v1.2.3.zip).
+        //
+        // A reviewer may propose this as a "cheap" fix for the stale-zip
+        // scenario. It is not cheap. It solves one narrow edge case and
+        // introduces an entirely new class of persistent-state problems that
+        // are significantly harder to reason about:
+        //
+        // STALE FILE ACCUMULATION: every update cycle writes a new filename.
+        // Previous filenames are never automatically cleaned up. The cache
+        // directory silently accumulates zips across sessions and across
+        // OS upgrades. A purge step is now required — but purge has its own
+        // race: if a purge runs while an install is in flight it wipes the
+        // zip the install is reading. You now need a lock or a flag to
+        // coordinate purge and install. That is new lifecycle complexity that
+        // does not exist today.
+        //
+        // FILENAME RECONSTRUCTION: fixedZipURL is a computed property used in
+        // at least four call sites (handle, downloadUpdate, installAndRelaunch,
+        // and the step-1 existence check). Version-stamped filenames require
+        // the current release tagName to be threaded through to every call site
+        // that constructs the URL. That means every call site now depends on
+        // a version string that may be stale, missing, or mismatched —
+        // exactly the class of error the fixed-path design eliminates.
+        //
+        // WHAT YOU ACTUALLY GAIN: one fewer stale-install session in the
+        // pathological case where a zip from a previous version is cached
+        // when a new version is discovered. The stale session already
+        // self-heals in one cycle (see STALE ZIP above). The upside is
+        // near zero in practice.
+        //
+        // CONCLUSION: version-in-filename trades one transient self-healing
+        // edge case for an entirely new category of persistent state management
+        // bugs. The library's core design principle is simplicity and minimal
+        // state (see PRINCIPLES.md). This idea is permanently rejected.
+        // Do not re-raise it without a concrete rebuttal to the STALE FILE
+        // ACCUMULATION and FILENAME RECONSTRUCTION points above.
         let zipURL = fixedZipURL
         if FileManager.default.fileExists(atPath: zipURL.path) {
             state.apply(.ready(version: release.tagName))
