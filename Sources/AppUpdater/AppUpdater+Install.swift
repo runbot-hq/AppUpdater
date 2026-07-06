@@ -92,6 +92,11 @@ extension AppUpdater {
             betaChannel: betaChannel,
             assetName: assetName
         )
+        // String equality is intentional — this is an identity check, not a
+        // semver ordering check. The question is: "is the tag GitHub just
+        // returned the same tag we cached?" not "is it a higher version?"
+        // Semver ordering is already done at download time in checkAndHandle.
+        // Do NOT replace != with a semver comparison here.
         if case .fetched(let latest) = revalidation,
            let latest,
            latest.tagName != version {
