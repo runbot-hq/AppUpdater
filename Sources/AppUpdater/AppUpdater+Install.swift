@@ -79,6 +79,13 @@ extension AppUpdater {
         // ❌ DO NOT change .failed or .fetched(nil) to abort — that degrades
         // install UX for users on poor connectivity or during a GitHub outage.
         // The only actionable signal is a confirmed different tag.
+        //
+        // Channel drift: betaChannelProvider() is called here at install time,
+        // which may differ from the value read at download time if the user
+        // toggled the beta preference in between. This is safe: the only case
+        // where a channel change affects the result is .fetched(nil) (no channel
+        // match for the new preference), which proceeds optimistically per the
+        // table above. A mid-flight toggle cannot produce a spurious abort.
         let betaChannel = betaChannelProvider()
         let revalidation = await provider.fetchLatestRelease(
             repo: repo,
@@ -96,6 +103,13 @@ extension AppUpdater {
                 + "superseded by \(latest.tagName, privacy: .public) — wiping zip and resetting to idle"
             )
             isInstalling = false
+            // removeItem runs synchronously on @MainActor via withZipURL —
+            // this is intentional. The zip is always a local ~/Library/Caches
+            // file, never a network or NFS path; the call completes in
+            // microseconds. Wrapping in a detached Task would be principled
+            // but adds indirection for no practical gain here. If this path
+            // ever needs to handle slow or remote filesystems, move the
+            // removeItem into a Task at that point.
             withZipURL { zipURL in
                 try? FileManager.default.removeItem(at: zipURL)
             }
