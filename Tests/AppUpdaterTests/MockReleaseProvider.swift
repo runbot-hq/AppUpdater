@@ -14,25 +14,31 @@
 ///
 /// ```swift
 /// let provider = MockReleaseProvider()
-/// provider.releaseToReturn = AvailableRelease(tagName: "v2.0.0", assets: [], checksumURL: nil)
-/// let updater = AppUpdater(
-///     repo: "owner/repo",
-///     currentVersion: "1.0.0",
-///     assetName: { _ in "App.zip" },
-///     schedulerIdentifier: "com.test.update",
-///     releaseProvider: provider
-/// )
+/// await provider.set(releaseToReturn: AvailableRelease(tagName: "v2.0.0", assets: [], checksumURL: nil))
+/// // or simulate a fetch failure:
+/// await provider.set(fetchResultToReturn: .failed)
 /// ```
 actor MockReleaseProvider: ReleaseProvider {
 
     // MARK: - Configuration
 
-    /// The release to return from `fetchLatestRelease`. `nil` simulates a
-    /// network failure or empty releases list.
-    var releaseToReturn: AvailableRelease?
+    /// The `ReleaseFetchResult` to return from `fetchLatestRelease`.
+    /// Defaults to `.fetched(nil)` (simulates a successful fetch with no
+    /// channel match — the safest default for tests that don't configure a
+    /// release).
+    var fetchResultToReturn: ReleaseFetchResult = .fetched(nil)
+
+    /// Convenience setter: wraps `release` in `.fetched(release)` and assigns
+    /// to `fetchResultToReturn`. Pass `nil` to simulate no channel match.
+    var releaseToReturn: AvailableRelease? {
+        get {
+            if case .fetched(let r) = fetchResultToReturn { return r }
+            return nil
+        }
+        set { fetchResultToReturn = .fetched(newValue) }
+    }
 
     /// Convenience: number of simulated async yield points per fetch call.
-    /// Uses `await Task.yield()` (Pillar 5 — no DispatchQueue).
     var simulatedSteps: Int = 1
 
     // MARK: - Call capture
@@ -52,14 +58,24 @@ actor MockReleaseProvider: ReleaseProvider {
     // MARK: - Init
 
     /// Creates a mock with an optional pre-configured release.
+    /// Pass a `ReleaseFetchResult` to control the exact return value,
+    /// or pass an `AvailableRelease?` via the convenience init.
     init(releaseToReturn: AvailableRelease? = nil) {
-        self.releaseToReturn = releaseToReturn
+        self.fetchResultToReturn = .fetched(releaseToReturn)
     }
 
-    /// Mutates `releaseToReturn` from the outside (for tests that can't use
-    /// the initialiser after construction).
+    init(fetchResultToReturn: ReleaseFetchResult) {
+        self.fetchResultToReturn = fetchResultToReturn
+    }
+
+    /// Mutates `fetchResultToReturn` from a test body.
+    func set(fetchResultToReturn: ReleaseFetchResult) {
+        self.fetchResultToReturn = fetchResultToReturn
+    }
+
+    /// Convenience: wraps `release` in `.fetched` and assigns.
     func set(releaseToReturn: AvailableRelease?) {
-        self.releaseToReturn = releaseToReturn
+        self.fetchResultToReturn = .fetched(releaseToReturn)
     }
 
     // MARK: - ReleaseProvider
@@ -68,11 +84,11 @@ actor MockReleaseProvider: ReleaseProvider {
         repo: String,
         betaChannel: Bool,
         assetName: @Sendable (String) -> String
-    ) async -> AvailableRelease? {
+    ) async -> ReleaseFetchResult {
         fetchCallCount += 1
         capturedRepo = repo
         capturedBetaChannel = betaChannel
         for _ in 0..<simulatedSteps { await Task.yield() }
-        return releaseToReturn
+        return fetchResultToReturn
     }
 }

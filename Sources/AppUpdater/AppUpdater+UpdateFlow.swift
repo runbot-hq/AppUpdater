@@ -29,23 +29,32 @@ extension AppUpdater {
 
     /// Runs a channel-aware update check via the injected `ReleaseProvider`.
     ///
+    /// Uses `UpdateChecker.evaluate` so that no-channel-match (`.fetched(nil)`)
+    /// correctly maps to `.upToDate` and a fetch failure (`.failed`) correctly
+    /// maps to `.failed(.noReleasesFound)`.
+    ///
     /// Intentionally `internal` — `checkAndHandle` is the designed public
     /// entry point for host apps.
     func checkForUpdate(betaChannel: Bool) async -> UpdateCheckResult {
-        guard !currentVersion.isEmpty else {
-            return .failed(UpdateCheckError.missingVersionKey)
-        }
-        guard let latest = await provider.fetchLatestRelease(
+        let fetchResult = await provider.fetchLatestRelease(
             repo: repo,
             betaChannel: betaChannel,
             assetName: assetName
-        ) else {
-            return .failed(UpdateCheckError.noReleasesFound)
+        )
+        switch fetchResult {
+        case .failed:
+            return UpdateChecker.evaluate(
+                availableRelease: nil,
+                currentVersion: currentVersion,
+                fetchFailed: true
+            )
+        case .fetched(let release):
+            return UpdateChecker.evaluate(
+                availableRelease: release,
+                currentVersion: currentVersion,
+                fetchFailed: false
+            )
         }
-        guard UpdateChecker.isNewer(latest.tagName, than: currentVersion) else {
-            return .upToDate
-        }
-        return .updateAvailable(release: latest)
     }
 
     // MARK: - Handle

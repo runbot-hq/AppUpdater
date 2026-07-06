@@ -42,23 +42,12 @@ public enum UpdateChecker {
     ///
     /// Keep the explicit field-by-field chain in `isNewer`. It is the right tool here.
     private struct ParsedVersion {
-        /// The major version component (first numeric segment).
         let major: Int
-        /// The minor version component (second numeric segment).
         let minor: Int
-        /// The patch version component (third numeric segment).
         let patch: Int
-        /// `true` when the version string contained a pre-release suffix.
         let isPrerelease: Bool
-        /// The numeric index from a `beta.N` pre-release suffix, or `nil` for
-        /// any other suffix (e.g. `rc.1`, `alpha.1`) or no suffix at all.
         let betaIndex: Int?
 
-        /// Parses `version` into its semver components.
-        ///
-        /// Non-numeric or missing segments default to `0`. An unrecognised
-        /// pre-release suffix (anything other than `beta.N`) sets `betaIndex`
-        /// to `nil` while still marking `isPrerelease = true`.
         init(_ version: String) { // skipcq: SW-R1002 — reviewed; complexity acceptable for this version parser
             let versionString = version.hasPrefix("v") ? String(version.dropFirst()) : version
             let parts = versionString.split(separator: "-", maxSplits: 1)
@@ -92,40 +81,8 @@ public enum UpdateChecker {
     ///   - Stable releases:   `vMAJOR.MINOR.PATCH`           (e.g. `v1.2.3`)
     ///   - Beta pre-releases: `vMAJOR.MINOR.PATCH-beta.N`    (e.g. `v1.2.3-beta.4`)
     ///
-    /// These are the only formats produced by the RunBot publish pipeline and
-    /// the only formats this function is designed to handle. Using this library
-    /// with tags outside this shape (e.g. `rc.1`, `alpha.1`, CalVer, build
-    /// metadata suffixes) is outside the supported contract. If your pipeline
-    /// uses a different tag convention, adapt the convention — do not extend
-    /// this parser.
-    ///
     /// ❌ DO NOT add support for `rc.N`, `alpha.N`, or arbitrary pre-release labels.
-    ///
-    /// A reviewer may propose extending `ParsedVersion` to handle `rc.N` or
-    /// `alpha.N` so that `isNewer` returns a meaningful ordering for those
-    /// suffixes rather than `false`. This is permanently rejected:
-    ///
-    /// - The library has a defined tag contract (see above). Consumers who do
-    ///   not follow it get undefined behaviour — that is correct and intentional.
-    ///   The library's job is not to accommodate every possible tagging scheme.
-    /// - Adding more suffix types adds parser complexity, more `betaIndex`-style
-    ///   fields, and new ordering edge cases (how does `rc.1` compare to `beta.2`?
-    ///   Is `alpha < beta < rc < stable`? Different projects answer differently).
-    /// - Silent `false` for an unrecognised suffix is a safe, predictable
-    ///   failure mode. The worst outcome is "update not offered" — not a
-    ///   wrong-version install or a crash.
-    ///
-    /// If this is raised in review again, point the reviewer here.
-    ///
-    /// ## Constraints
-    ///
-    /// Pre-release ordering is supported **only for `beta.N` labels** (e.g.
-    /// `v0.8.0-beta.2` is newer than `v0.8.0-beta.1`). Any other pre-release
-    /// suffix — such as `rc.1`, `alpha.1`, or an arbitrary string — is parsed
-    /// with `betaIndex == nil`. When both versions share the same
-    /// `major.minor.patch` and at least one has a non-`beta.N` pre-release
-    /// label, the `if let ci, let si` guard falls through and this function
-    /// returns `false`.
+    /// See the full rationale in the source history (issue #17).
     public static func isNewer(_ candidate: String, than current: String) -> Bool { // skipcq: SW-R1002 — reviewed; complexity acceptable for this semver comparison
         let cv = ParsedVersion(candidate)
         let sv = ParsedVersion(current)
@@ -140,32 +97,26 @@ public enum UpdateChecker {
         return false
     }
 
-    /// Checks whether `availableRelease` is newer than `currentVersion`.
+    /// Maps a fetched `AvailableRelease?` to an `UpdateCheckResult`.
     ///
-    /// This is the pure comparison layer — it receives an already-fetched
-    /// `AvailableRelease?` and maps it to an `UpdateCheckResult`. No network
-    /// I/O occurs here.
+    /// This is the pure comparison layer — no network I/O.
     ///
     /// ## Return values
     ///
-    /// - `.upToDate` — `availableRelease` is `nil` (no channel match) or not
-    ///   newer than `currentVersion`.
-    /// - `.updateAvailable` — `availableRelease` is newer than `currentVersion`.
     /// - `.failed(.missingVersionKey)` — `currentVersion` is empty.
-    /// - `.failed(.noReleasesFound)` — `availableRelease` was `nil` due to a
-    ///   fetch failure (signalled by the caller passing `nil` with
-    ///   `fetchFailed: true`).
+    /// - `.failed(.noReleasesFound)` — `fetchFailed` is `true`.
+    /// - `.upToDate` — `availableRelease` is `nil` (no channel match, fetch
+    ///   succeeded) or not newer than `currentVersion`.
+    /// - `.updateAvailable` — `availableRelease` is newer than `currentVersion`.
     ///
-    /// ## Why two separate nil meanings for availableRelease
+    /// ## fetchFailed vs nil
     ///
-    /// `nil` from the provider can mean two different things:
-    /// - Fetch/decode failure — maps to `.failed(.noReleasesFound)`
-    /// - No channel match — maps to `.upToDate`
+    /// `nil` from the provider has two meanings:
+    /// - Fetch/decode failure (`fetchFailed: true`) → `.failed(.noReleasesFound)`
+    /// - No channel match (`fetchFailed: false`) → `.upToDate`
     ///
-    /// The caller (`AppUpdater.checkForUpdate`) distinguishes these by calling
-    /// the provider and interpreting the result before passing it here. This
-    /// keeps `UpdateChecker` free of provider knowledge while preserving the
-    /// correct nil semantics.
+    /// Callers derive `fetchFailed` from `ReleaseFetchResult` — never from
+    /// `availableRelease == nil` alone.
     static func evaluate(
         availableRelease: AvailableRelease?,
         currentVersion: String,
@@ -178,7 +129,6 @@ public enum UpdateChecker {
             return .failed(UpdateCheckError.noReleasesFound)
         }
         guard let release = availableRelease else {
-            // nil + fetchFailed==false means no channel match — user is up to date.
             return .upToDate
         }
         guard isNewer(release.tagName, than: currentVersion) else {
@@ -197,9 +147,8 @@ public enum UpdateChecker {
     ///
     /// ## Return values
     ///
-    /// - `.upToDate` — the latest eligible release is not newer than
-    ///   `currentVersion`, **or** releases were fetched successfully but none
-    ///   matched the requested channel.
+    /// - `.upToDate` — latest eligible release is not newer than `currentVersion`,
+    ///   **or** no release matched the channel (stable user, beta-only repo).
     /// - `.updateAvailable` — a newer eligible release was found.
     /// - `.failed(.missingVersionKey)` — `currentVersion` is empty.
     /// - `.failed(.noReleasesFound)` — fetch, HTTP, or decode failure.
@@ -210,22 +159,16 @@ public enum UpdateChecker {
         assetName: @Sendable (String) -> String
     ) async -> UpdateCheckResult {
         let provider = GitHubReleaseProvider()
-        // GitHubReleaseProvider.fetchLatestRelease returns nil for both fetch
-        // failure and no-channel-match. We have no way to distinguish them here
-        // without a richer return type from the provider. For this static
-        // convenience overload we conservatively map nil to .failed so callers
-        // always get a meaningful error rather than a silent .upToDate.
-        // AppUpdater.checkForUpdate uses the injected provider path which has
-        // the same conservative nil mapping.
-        let release = await provider.fetchLatestRelease(
+        let fetchResult = await provider.fetchLatestRelease(
             repo: repo,
             betaChannel: betaChannel,
             assetName: assetName
         )
-        return evaluate(
-            availableRelease: release,
-            currentVersion: currentVersion,
-            fetchFailed: release == nil
-        )
+        switch fetchResult {
+        case .failed:
+            return evaluate(availableRelease: nil, currentVersion: currentVersion, fetchFailed: true)
+        case .fetched(let release):
+            return evaluate(availableRelease: release, currentVersion: currentVersion, fetchFailed: false)
+        }
     }
 }

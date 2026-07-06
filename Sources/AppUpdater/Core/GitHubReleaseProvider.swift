@@ -48,9 +48,12 @@ public struct GitHubReleaseProvider: ReleaseProvider {
 
     /// Fetches the latest release for `repo` matching `betaChannel`.
     ///
-    /// Returns `nil` on any failure (network error, non-200 response, decode
-    /// failure, empty list, no channel match). All failure modes are
-    /// best-effort and must never surface error UI.
+    /// Returns:
+    /// - `.failed` on network error, non-200 HTTP response, or JSON decode
+    ///   failure.
+    /// - `.fetched(nil)` when the fetch succeeded but no release matched the
+    ///   channel filter (e.g. stable user on a beta-only repo).
+    /// - `.fetched(release)` when a matching release was found.
     ///
     /// This method performs fetch + filter only — **no version comparison**.
     /// The version comparison is `AppUpdater`'s responsibility via
@@ -75,17 +78,21 @@ public struct GitHubReleaseProvider: ReleaseProvider {
         repo: String,
         betaChannel: Bool,
         assetName: @Sendable (String) -> String
-    ) async -> AvailableRelease? {
-        guard let releases = await fetchAndDecodeReleases(repo: repo) else { return nil }
-        guard let latest = latestMatchingRelease(from: releases, betaChannel: betaChannel)
-        else { return nil }
+    ) async -> ReleaseFetchResult {
+        guard let releases = await fetchAndDecodeReleases(repo: repo) else {
+            return .failed
+        }
+        guard let latest = latestMatchingRelease(from: releases, betaChannel: betaChannel) else {
+            // Fetch succeeded but no release matched the channel — not a failure.
+            return .fetched(nil)
+        }
         let checksumAssetName = assetName(latest.tagName) + ".sha256"
         let checksumAsset = latest.assets.first(where: { $0.name == checksumAssetName })
-        return AvailableRelease(
+        return .fetched(AvailableRelease(
             tagName: latest.tagName,
             assets: latest.assets,
             checksumURL: checksumAsset?.browserDownloadURL
-        )
+        ))
     }
 
     // MARK: - Private fetch pipeline
