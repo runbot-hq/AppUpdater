@@ -138,8 +138,30 @@ extension AppUpdater {
             // but adds indirection for no practical gain here. If this path
             // ever needs to handle slow or remote filesystems, move the
             // removeItem into a Task at that point.
+            //
+            // do/catch, not try? — .idle is only correct when the zip is
+            // actually gone. If removeItem throws (permissions error, file
+            // already absent, sandbox restriction), the stale zip remains on
+            // disk. The next scheduler cycle calls handle(), which does
+            // fileExists(atPath: zipURL.path) → true and immediately applies
+            // .ready with the new tag name but the OLD zip — exactly the
+            // stale-install this revalidation step was introduced to prevent.
+            // On removal failure we apply .failed so the host surfaces a
+            // recoverable error state instead of silently recycling the
+            // yanked zip. REVIEWER: do NOT revert this to try?.
+            var zipRemovalFailed = false
             withZipURL { zipURL in
-                try? FileManager.default.removeItem(at: zipURL)
+                do {
+                    try FileManager.default.removeItem(at: zipURL)
+                } catch {
+                    appUpdaterLogger.error("yank-revalidation: failed to remove stale zip — applying .failed to prevent stale-zip re-entry: \(String(describing: error), privacy: .public)")
+                    zipRemovalFailed = true
+                }
+            }
+            if zipRemovalFailed {
+                state.apply(.failed(version: version))
+                isInstalling = false
+                return
             }
             // .idle, not .failed — nothing was attempted. The zip was never
             // unzipped and the running bundle was never touched, so there is
