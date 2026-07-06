@@ -112,6 +112,20 @@ public enum UpdateChecker {
     ///
     /// This is the pure comparison layer — no network I/O.
     ///
+    /// ## Access
+    ///
+    /// Intentionally `internal`, not `public`. Reached by `AppUpdater+UpdateFlow`
+    /// and indirectly by tests via `updater.checkForUpdate`. ❌ DO NOT make public:
+    /// the `evaluate` signature is an implementation detail; external callers must
+    /// go through `checkForUpdate`.
+    ///
+    /// ## Priority order
+    ///
+    /// `fetchFailed` is checked before `currentVersion.isEmpty` so that a host
+    /// app with an empty version string does not mask a real network failure
+    /// with a misleading `.missingVersionKey` error. If both conditions are
+    /// true, the network failure is the actionable signal.
+    ///
     /// ## Return values
     ///
     /// - `.failed(.noReleasesFound)` — `fetchFailed` is `true`. Checked first;
@@ -122,13 +136,6 @@ public enum UpdateChecker {
     ///   succeeded) or not newer than `currentVersion`.
     /// - `.updateAvailable` — `availableRelease` is newer than `currentVersion`.
     ///
-    /// ## Priority order
-    ///
-    /// `fetchFailed` is checked before `currentVersion.isEmpty` so that a host
-    /// app with an empty version string does not mask a real network failure
-    /// with a misleading `.missingVersionKey` error. If both conditions are
-    /// true, the network failure is the actionable signal.
-    ///
     /// ## fetchFailed vs nil
     ///
     /// `nil` from the provider has two meanings:
@@ -137,9 +144,6 @@ public enum UpdateChecker {
     ///
     /// Callers derive `fetchFailed` from `ReleaseFetchResult` — never from
     /// `availableRelease == nil` alone.
-    // internal — not public API. Reached by AppUpdater+UpdateFlow and indirectly
-    // by tests via updater.checkForUpdate. ❌ DO NOT make public: the evaluate
-    // signature is an implementation detail; callers must go through checkForUpdate.
     static func evaluate(
         availableRelease: AvailableRelease?,
         currentVersion: String,

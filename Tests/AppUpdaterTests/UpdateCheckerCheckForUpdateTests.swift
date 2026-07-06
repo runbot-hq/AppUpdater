@@ -49,12 +49,19 @@ struct UpdateCheckerCheckForUpdateTests {
 
     // MARK: - missingVersionKey
 
-    @Test func emptyCurrentVersion_returnsMissingVersionKey() async throws {
-        let result = await UpdateChecker.checkForUpdate(
-            repo: "owner/repo",
+    /// Verifies that `evaluate` returns `.missingVersionKey` when
+    /// `currentVersion` is empty and no fetch failure occurred.
+    ///
+    /// Calls `evaluate` directly (not the public `checkForUpdate`) so the test
+    /// is purely synchronous and never touches the network. The public
+    /// `checkForUpdate` makes a real network request in CI which would fail,
+    /// and with the `fetchFailed` priority fix that would return
+    /// `.noReleasesFound` instead — masking this path entirely.
+    @Test func emptyCurrentVersion_returnsMissingVersionKey() {
+        let result = UpdateChecker.evaluate(
+            availableRelease: nil,
             currentVersion: "",
-            betaChannel: false,
-            assetName: { _ in "App.zip" }
+            fetchFailed: false
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
@@ -114,13 +121,20 @@ struct UpdateCheckerCheckForUpdateTests {
 /// A minimal Decodable mirror of the JSON fixture shape. Decodes only the
 /// fields needed by these tests; extra fields are ignored.
 private struct FixtureRelease: Decodable {
+    /// The git tag name (e.g. `"v2.0.0"`).
     let tagName: String
+    /// `true` when GitHub has marked this as a pre-release.
     let prerelease: Bool
+    /// The binary assets attached to this release.
     let assets: [ReleaseAsset]
 
+    /// Maps Swift property names to the fixture JSON's snake_case keys.
     enum CodingKeys: String, CodingKey {
+        /// Maps to `"tag_name"`.
         case tagName = "tag_name"
+        /// Maps to `"prerelease"`.
         case prerelease
+        /// Maps to `"assets"`.
         case assets
     }
 }
