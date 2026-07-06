@@ -28,17 +28,29 @@ actor MockReleaseProvider: ReleaseProvider {
     /// release).
     var fetchResultToReturn: ReleaseFetchResult = .fetched(nil)
 
-    /// Convenience: wraps `release` in `.fetched(release)` and assigns to
+    /// Convenience accessor: unwraps the associated value of `.fetched(_)`.
+    ///
+    /// **Getter**: returns the `AvailableRelease?` associated with
+    /// `.fetched(_)`. Crashes via `preconditionFailure` when
+    /// `fetchResultToReturn` is `.failed` — reading this property back to
+    /// assert a failure condition is a test bug; use `fetchResultToReturn`
+    /// directly instead.
+    ///
+    /// **Setter**: wraps `newValue` in `.fetched(newValue)` and assigns to
     /// `fetchResultToReturn`. Pass `nil` to simulate no channel match
     /// (`.fetched(nil)`).
-    ///
-    /// ⚠️ Returns `nil` for **both** `.fetched(nil)` and `.failed` — do not
-    /// read this property back to assert failure state. Use
-    /// `fetchResultToReturn` directly when you need to distinguish the two.
     var releaseToReturn: AvailableRelease? {
         get {
-            if case .fetched(let r) = fetchResultToReturn { return r }
-            return nil
+            switch fetchResultToReturn {
+            case .fetched(let r):
+                return r
+            case .failed:
+                preconditionFailure(
+                    "releaseToReturn getter called when fetchResultToReturn is .failed. "
+                    + "This is a test bug: use fetchResultToReturn directly to assert "
+                    + "failure state instead of reading releaseToReturn."
+                )
+            }
         }
         set { fetchResultToReturn = .fetched(newValue) }
     }

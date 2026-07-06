@@ -142,28 +142,28 @@ public enum UpdateChecker {
     /// - `.upToDate` — `fetchResult` is `.fetched(nil)` (no channel match) or
     ///   the fetched release is not newer than `currentVersion`.
     /// - `.updateAvailable` — fetched release is newer than `currentVersion`.
+    ///
+    /// ## Exhaustion enforcement
+    ///
+    /// `fetchResult` is matched with a `switch` (no `default`) so that adding
+    /// a new case to `ReleaseFetchResult` produces a compiler error here,
+    /// forcing an explicit handling decision. Do not add a `default` or
+    /// `@unknown default` arm — either would silently swallow new cases.
     static func evaluate(
         fetchResult: ReleaseFetchResult,
         currentVersion: String
     ) -> UpdateCheckResult {
-        if case .failed = fetchResult {
+        switch fetchResult {
+        case .failed:
             return .failed(UpdateCheckError.noReleasesFound)
-        }
-        guard !currentVersion.isEmpty else {
-            return .failed(UpdateCheckError.missingVersionKey)
-        }
-        if case .fetched(let release) = fetchResult {
+        case .fetched(let release):
+            guard !currentVersion.isEmpty else {
+                return .failed(UpdateCheckError.missingVersionKey)
+            }
             guard let release else { return .upToDate }
             guard isNewer(release.tagName, than: currentVersion) else { return .upToDate }
             return .updateAvailable(release: release)
         }
-        // Safe exhaustion net: unreachable today (ReleaseFetchResult has two cases
-        // and .failed is handled above), but returns the correct sentinel if the
-        // enum gains a third case (.rateLimited, .offline, etc.) without a
-        // corresponding update here. .upToDate would be the wrong fallback — it
-        // is a positive result, not a failure. .noReleasesFound is consistent with
-        // how the explicit .failed case above is handled.
-        return .failed(UpdateCheckError.noReleasesFound)
     }
 
     /// Checks for an available update for `repo`.
