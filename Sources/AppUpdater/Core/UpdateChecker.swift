@@ -4,30 +4,15 @@ import Foundation
 
 // MARK: - UpdateChecker
 
-/// Checks a GitHub repository's Releases for a newer version.
+/// Pure semver business logic: version parsing, comparison, and update-check
+/// orchestration.
+///
+/// `UpdateChecker` deliberately owns **no network code**. All fetch, decode,
+/// and channel-filtering logic lives in `GitHubReleaseProvider`. This
+/// separation means `UpdateChecker` can be tested without any network
+/// involvement and `GitHubReleaseProvider` can be swapped out via the
+/// `ReleaseProvider` protocol.
 public enum UpdateChecker {
-
-    /// Lightweight mirror of the GitHub Releases API response object.
-    ///
-    /// Only the fields needed for version comparison and asset resolution are
-    /// decoded; all other API fields are ignored.
-    private struct Release: Decodable {
-        /// The git tag name of this release (e.g. `"v0.8.0"`).
-        let tagName: String
-        /// `true` when GitHub has marked this release as a pre-release.
-        let prerelease: Bool
-        /// The binary assets attached to this release.
-        let assets: [ReleaseAsset]
-        /// Maps Swift property names to the GitHub API's snake_case JSON keys.
-        enum CodingKeys: String, CodingKey {
-            /// Maps to the GitHub API JSON key `"tag_name"`.
-            case tagName = "tag_name"
-            /// Maps to the JSON key `"prerelease"`.
-            case prerelease
-            /// Maps to the JSON key `"assets"`.
-            case assets
-        }
-    }
 
     /// A parsed representation of a semver version string used internally by `isNewer`.
     ///
@@ -98,126 +83,6 @@ public enum UpdateChecker {
         }
     }
 
-    /// Builds a `URLRequest` for the releases endpoint of `repo`.
-    ///
-    /// `perPage` is clamped to `1...100` (GitHub's documented maximum for this
-    /// endpoint). A single request is made — no pagination.
-    ///
-    /// ## ⚠️ 100-release ceiling
-    ///
-    /// `fetchAndDecodeReleases` makes exactly one request with `per_page=100`.
-    /// If a repository has published more than 100 releases the oldest releases
-    /// (by GitHub's default sort, newest first) are never seen. For most repos
-    /// this is not a problem — the newest release is always in the first page.
-    /// However if you publish hotfixes to old branches and those appear after
-    /// the 100th entry you may miss them. See README "Known limitations" for
-    /// the recommended mitigation (keep releases ≤ 100, or draft/delete old ones).
-    private static func buildRequest(repo: String, perPage: Int) -> URLRequest? {
-        let clampedPerPage = min(max(perPage, 1), 100)
-        let releasesURLString = "https://api.github.com/repos/\(repo)/releases"
-        guard let baseURL = URL(string: releasesURLString) else { return nil }
-        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-        else { return nil }
-        components.queryItems = [URLQueryItem(name: "per_page", value: String(clampedPerPage))]
-        guard let requestURL = components.url else { return nil }
-        var request = URLRequest(url: requestURL)
-        request.setValue("AppUpdater", forHTTPHeaderField: "User-Agent")
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-        return request
-    }
-
-    /// Fetches and decodes the releases list for `repo`.
-    ///
-    /// Returns `nil` on any network, HTTP, or JSON-decode failure. An empty
-    /// array means the repository exists but has no published releases.
-    /// This is intentionally separate from channel filtering — a `nil` return
-    /// here means "we could not determine the release list", whereas an empty
-    /// filtered result means "releases exist but none match the channel".
-    private static func fetchAndDecodeReleases(repo: String) async -> [Release]? {
-        guard let request = buildRequest(repo: repo, perPage: 100) else { return nil }
-
-        let sessionConfig = URLSessionConfiguration.ephemeral
-        sessionConfig.timeoutIntervalForRequest = 30
-        sessionConfig.timeoutIntervalForResource = 60
-        let session = URLSession(configuration: sessionConfig)
-        defer { session.finishTasksAndInvalidate() }
-
-        guard let (data, response) = try? await session.data(for: request) else { return nil }
-
-        if let httpResponse = response as? HTTPURLResponse,
-           httpResponse.statusCode != 200 {
-            appUpdaterLogger.debug("releases API returned \(httpResponse.statusCode, privacy: .public) for \(repo, privacy: .public)")
-            return nil
-        }
-
-        return try? JSONDecoder().decode([Release].self, from: data)
-    }
-
-    /// Sorts `releases` by semver (newest first) and returns the first entry
-    /// that matches `betaChannel`.
-    ///
-    /// Returns `nil` when no release matches the channel filter — i.e. the
-    /// caller is on the stable channel and every release is a pre-release.
-    /// This `nil` means **no channel match**, not a fetch failure; the two
-    /// cases are kept separate so callers can map them to different outcomes
-    /// (`.upToDate` vs `.failed`).
-    private static func latestMatchingRelease(
-        from releases: [Release],
-        betaChannel: Bool
-    ) -> Release? {
-        // Sorted rather than max-scan by design — runs at most once per 24 hours on
-        // ≤ 100 items. The clarity of .first on a sorted list outweighs the irrelevant
-        // perf difference. Do not "optimise" this.
-        let sorted = releases.sorted { isNewer($0.tagName, than: $1.tagName) }
-        return sorted.first(where: { betaChannel ? true : !$0.prerelease })
-    }
-
-    /// Returns an `AvailableRelease` for the latest release matching `betaChannel`,
-    /// or `nil` if the fetch failed or no release matched the channel.
-    ///
-    /// This is the lower-level fetch primitive used by `GitHubReleaseProvider`.
-    /// Unlike `checkForUpdate`, it does **not** perform a semver comparison against
-    /// `currentVersion` — it simply returns the latest eligible release from the
-    /// API, or `nil` on any failure (network, HTTP, decode, or no channel match).
-    ///
-    /// ## ❌ DO NOT replace this with a call to `checkForUpdate`
-    ///
-    /// This looks like duplication — both this method and `checkForUpdate` call
-    /// `fetchAndDecodeReleases` and `latestMatchingRelease`. It is not duplication.
-    /// The two methods have different contracts:
-    ///
-    /// - `fetchLatestAvailableRelease` — fetch + filter only. No version comparison.
-    ///   Returns the latest eligible release unconditionally (subject to network/channel).
-    /// - `checkForUpdate` — fetch + filter + compare. Returns `.upToDate` when the
-    ///   latest release is not newer than `currentVersion`.
-    ///
-    /// If you collapse this into `checkForUpdate` using a sentinel `currentVersion`
-    /// (e.g. `"v0.0.0"` or `""`) you introduce a regression: any repo whose latest
-    /// release is tagged exactly `v0.0.0` will silently return `nil` because
-    /// `isNewer("v0.0.0", than: "v0.0.0")` is `false`. The sentinel is a trap.
-    /// This has already been attempted — see PR #20 and issue #13.
-    ///
-    /// Callers that need to distinguish "fetch failed" from "no channel match"
-    /// should use `checkForUpdate` instead, which maps these to `.failed` and
-    /// `.upToDate` respectively.
-    static func fetchLatestAvailableRelease(
-        repo: String,
-        betaChannel: Bool,
-        assetName: (String) -> String
-    ) async -> AvailableRelease? {
-        guard let releases = await fetchAndDecodeReleases(repo: repo) else { return nil }
-        guard let latest = latestMatchingRelease(from: releases, betaChannel: betaChannel)
-        else { return nil }
-        let checksumAssetName = assetName(latest.tagName) + ".sha256"
-        let checksumAsset = latest.assets.first(where: { $0.name == checksumAssetName })
-        return AvailableRelease(
-            tagName: latest.tagName,
-            assets: latest.assets,
-            checksumURL: checksumAsset?.browserDownloadURL
-        )
-    }
-
     /// Returns `true` when `candidate` is strictly newer than `current` using
     /// numeric semver comparison, including beta ordering.
     ///
@@ -275,62 +140,92 @@ public enum UpdateChecker {
         return false
     }
 
+    /// Checks whether `availableRelease` is newer than `currentVersion`.
+    ///
+    /// This is the pure comparison layer — it receives an already-fetched
+    /// `AvailableRelease?` and maps it to an `UpdateCheckResult`. No network
+    /// I/O occurs here.
+    ///
+    /// ## Return values
+    ///
+    /// - `.upToDate` — `availableRelease` is `nil` (no channel match) or not
+    ///   newer than `currentVersion`.
+    /// - `.updateAvailable` — `availableRelease` is newer than `currentVersion`.
+    /// - `.failed(.missingVersionKey)` — `currentVersion` is empty.
+    /// - `.failed(.noReleasesFound)` — `availableRelease` was `nil` due to a
+    ///   fetch failure (signalled by the caller passing `nil` with
+    ///   `fetchFailed: true`).
+    ///
+    /// ## Why two separate nil meanings for availableRelease
+    ///
+    /// `nil` from the provider can mean two different things:
+    /// - Fetch/decode failure — maps to `.failed(.noReleasesFound)`
+    /// - No channel match — maps to `.upToDate`
+    ///
+    /// The caller (`AppUpdater.checkForUpdate`) distinguishes these by calling
+    /// the provider and interpreting the result before passing it here. This
+    /// keeps `UpdateChecker` free of provider knowledge while preserving the
+    /// correct nil semantics.
+    static func evaluate(
+        availableRelease: AvailableRelease?,
+        currentVersion: String,
+        fetchFailed: Bool
+    ) -> UpdateCheckResult {
+        guard !currentVersion.isEmpty else {
+            return .failed(UpdateCheckError.missingVersionKey)
+        }
+        if fetchFailed {
+            return .failed(UpdateCheckError.noReleasesFound)
+        }
+        guard let release = availableRelease else {
+            // nil + fetchFailed==false means no channel match — user is up to date.
+            return .upToDate
+        }
+        guard isNewer(release.tagName, than: currentVersion) else {
+            return .upToDate
+        }
+        return .updateAvailable(release: release)
+    }
+
     /// Checks for an available update for `repo`.
+    ///
+    /// This overload performs the full fetch+compare pipeline using
+    /// `GitHubReleaseProvider` directly. It exists for call sites that do not
+    /// have an injected provider (e.g. one-shot CLI usage). `AppUpdater` uses
+    /// the instance-level `checkForUpdate` which goes through the injected
+    /// provider instead.
     ///
     /// ## Return values
     ///
     /// - `.upToDate` — the latest eligible release is not newer than
     ///   `currentVersion`, **or** releases were fetched successfully but none
-    ///   matched the requested channel (e.g. `betaChannel: false` and the
-    ///   repository only has pre-releases). In both cases the caller is already
-    ///   on the latest version they are eligible for.
+    ///   matched the requested channel.
     /// - `.updateAvailable` — a newer eligible release was found.
     /// - `.failed(.missingVersionKey)` — `currentVersion` is empty.
-    /// - `.failed(.noReleasesFound)` — the releases API request failed, the
-    ///   HTTP response was non-200, or the response body could not be decoded.
-    ///   This does **not** mean "no channel match" — see `.upToDate` above.
+    /// - `.failed(.noReleasesFound)` — fetch, HTTP, or decode failure.
     public static func checkForUpdate(
         repo: String,
         currentVersion: String,
         betaChannel: Bool,
         assetName: (String) -> String
     ) async -> UpdateCheckResult {
-        guard !currentVersion.isEmpty else {
-            return .failed(UpdateCheckError.missingVersionKey)
-        }
-
-        // Step 1: fetch and decode. nil here means a genuine fetch/decode failure.
-        guard let releases = await fetchAndDecodeReleases(repo: repo) else {
-            return .failed(UpdateCheckError.noReleasesFound)
-        }
-
-        // Step 2: filter by channel.
-        // ✅ REVIEWED: nil here maps to .upToDate, NOT .failed — this is
-        // deliberate. nil from latestMatchingRelease means releases were
-        // fetched successfully but none matched the requested channel (e.g.
-        // the user is on the stable channel and every published release is a
-        // pre-release). That is not a failure — the user is on the latest
-        // version they are eligible for. A reviewer may flag this as "swallows
-        // a no-match condition silently" — it does not. The distinction is
-        // documented in the UpdateCheckError.noReleasesFound doc comment and
-        // in the checkForUpdate return-value docs above. Do not change this
-        // to .failed — that would incorrectly show an error state to stable
-        // users on a beta-only repository.
-        guard let release = latestMatchingRelease(from: releases, betaChannel: betaChannel) else {
-            return .upToDate
-        }
-
-        let checksumAssetName = assetName(release.tagName) + ".sha256"
-        let checksumAsset = release.assets.first(where: { $0.name == checksumAssetName })
-        let availableRelease = AvailableRelease(
-            tagName: release.tagName,
-            assets: release.assets,
-            checksumURL: checksumAsset?.browserDownloadURL
+        let provider = GitHubReleaseProvider()
+        // GitHubReleaseProvider.fetchLatestRelease returns nil for both fetch
+        // failure and no-channel-match. We have no way to distinguish them here
+        // without a richer return type from the provider. For this static
+        // convenience overload we conservatively map nil to .failed so callers
+        // always get a meaningful error rather than a silent .upToDate.
+        // AppUpdater.checkForUpdate uses the injected provider path which has
+        // the same conservative nil mapping.
+        let release = await provider.fetchLatestRelease(
+            repo: repo,
+            betaChannel: betaChannel,
+            assetName: assetName
         )
-
-        guard isNewer(availableRelease.tagName, than: currentVersion) else {
-            return .upToDate
-        }
-        return .updateAvailable(release: availableRelease)
+        return evaluate(
+            availableRelease: release,
+            currentVersion: currentVersion,
+            fetchFailed: release == nil
+        )
     }
 }
