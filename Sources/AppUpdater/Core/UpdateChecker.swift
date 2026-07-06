@@ -114,11 +114,20 @@ public enum UpdateChecker {
     ///
     /// ## Return values
     ///
-    /// - `.failed(.missingVersionKey)` — `currentVersion` is empty.
-    /// - `.failed(.noReleasesFound)` — `fetchFailed` is `true`.
+    /// - `.failed(.noReleasesFound)` — `fetchFailed` is `true`. Checked first;
+    ///   a real network failure takes priority over a misconfigured host app.
+    /// - `.failed(.missingVersionKey)` — `currentVersion` is empty (and fetch
+    ///   did not fail).
     /// - `.upToDate` — `availableRelease` is `nil` (no channel match, fetch
     ///   succeeded) or not newer than `currentVersion`.
     /// - `.updateAvailable` — `availableRelease` is newer than `currentVersion`.
+    ///
+    /// ## Priority order
+    ///
+    /// `fetchFailed` is checked before `currentVersion.isEmpty` so that a host
+    /// app with an empty version string does not mask a real network failure
+    /// with a misleading `.missingVersionKey` error. If both conditions are
+    /// true, the network failure is the actionable signal.
     ///
     /// ## fetchFailed vs nil
     ///
@@ -128,16 +137,21 @@ public enum UpdateChecker {
     ///
     /// Callers derive `fetchFailed` from `ReleaseFetchResult` — never from
     /// `availableRelease == nil` alone.
+    // internal — not public API. Reached by AppUpdater+UpdateFlow and indirectly
+    // by tests via updater.checkForUpdate. ❌ DO NOT make public: the evaluate
+    // signature is an implementation detail; callers must go through checkForUpdate.
     static func evaluate(
         availableRelease: AvailableRelease?,
         currentVersion: String,
         fetchFailed: Bool
     ) -> UpdateCheckResult {
-        guard !currentVersion.isEmpty else {
-            return .failed(UpdateCheckError.missingVersionKey)
-        }
+        // ❌ DO NOT reorder these guards. fetchFailed must be checked first.
+        // See "Priority order" in the doc comment above.
         if fetchFailed {
             return .failed(UpdateCheckError.noReleasesFound)
+        }
+        guard !currentVersion.isEmpty else {
+            return .failed(UpdateCheckError.missingVersionKey)
         }
         guard let release = availableRelease else {
             return .upToDate
@@ -161,8 +175,9 @@ public enum UpdateChecker {
     /// - `.upToDate` — latest eligible release is not newer than `currentVersion`,
     ///   **or** no release matched the channel (stable user, beta-only repo).
     /// - `.updateAvailable` — a newer eligible release was found.
-    /// - `.failed(.missingVersionKey)` — `currentVersion` is empty.
     /// - `.failed(.noReleasesFound)` — fetch, HTTP, or decode failure.
+    /// - `.failed(.missingVersionKey)` — `currentVersion` is empty and fetch
+    ///   did not fail.
     public static func checkForUpdate(
         repo: String,
         currentVersion: String,

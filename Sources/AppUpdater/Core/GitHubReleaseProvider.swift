@@ -133,6 +133,10 @@ public struct GitHubReleaseProvider: ReleaseProvider {
     /// This is intentionally separate from channel filtering — a `nil` return
     /// here means "we could not determine the release list", whereas an empty
     /// filtered result means "releases exist but none match the channel".
+    ///
+    /// Non-200 responses log both the status code and the raw response body
+    /// (as UTF-8) at debug level so that 401/403/429 error messages from the
+    /// GitHub API are visible during triage without requiring a proxy.
     private func fetchAndDecodeReleases(repo: String) async -> [Release]? {
         guard let request = buildRequest(repo: repo, perPage: 100) else { return nil }
 
@@ -146,7 +150,10 @@ public struct GitHubReleaseProvider: ReleaseProvider {
 
         if let httpResponse = response as? HTTPURLResponse,
            httpResponse.statusCode != 200 {
-            appUpdaterLogger.debug("releases API returned \(httpResponse.statusCode, privacy: .public) for \(repo, privacy: .public)")
+            let body = String(data: data, encoding: .utf8) ?? "<non-UTF-8 body>"
+            appUpdaterLogger.debug(
+                "releases API returned \(httpResponse.statusCode, privacy: .public) for \(repo, privacy: .public): \(body, privacy: .public)"
+            )
             return nil
         }
 

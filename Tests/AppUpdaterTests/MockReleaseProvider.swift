@@ -28,8 +28,13 @@ actor MockReleaseProvider: ReleaseProvider {
     /// release).
     var fetchResultToReturn: ReleaseFetchResult = .fetched(nil)
 
-    /// Convenience setter: wraps `release` in `.fetched(release)` and assigns
-    /// to `fetchResultToReturn`. Pass `nil` to simulate no channel match.
+    /// Convenience: wraps `release` in `.fetched(release)` and assigns to
+    /// `fetchResultToReturn`. Pass `nil` to simulate no channel match
+    /// (`.fetched(nil)`).
+    ///
+    /// ⚠️ Returns `nil` for **both** `.fetched(nil)` and `.failed` — do not
+    /// read this property back to assert failure state. Use
+    /// `fetchResultToReturn` directly when you need to distinguish the two.
     var releaseToReturn: AvailableRelease? {
         get {
             if case .fetched(let r) = fetchResultToReturn { return r }
