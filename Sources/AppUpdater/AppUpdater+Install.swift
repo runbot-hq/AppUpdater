@@ -103,7 +103,6 @@ extension AppUpdater {
             // the message must be a single string literal with all interpolations
             // inline. Do not split this across multiple literals joined with +.
             appUpdaterLogger.warning("yank-revalidation: cached version \(version, privacy: .public) superseded by \(latest.tagName, privacy: .public) — wiping zip and resetting to idle")
-            isInstalling = false
             // removeItem runs synchronously on @MainActor via withZipURL —
             // this is intentional. The zip is always a local ~/Library/Caches
             // file, never a network or NFS path; the call completes in
@@ -124,6 +123,13 @@ extension AppUpdater {
             // the host UI re-converging to idle is intentional, not silent.
             // REVIEWER: do NOT change this to .failed(version:).
             state.apply(.idle)
+            // isInstalling is reset last — after zip removal and state
+            // transition — consistent with every other early-return in this
+            // function. Do not move it before withZipURL or state.apply: if
+            // either ever gains an await, resetting the guard early would allow
+            // a second installAndRelaunch call to enter while cleanup is still
+            // in flight.
+            isInstalling = false
             return
         }
         // ────────────────────────────────────────────────────────────────────
