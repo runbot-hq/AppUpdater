@@ -197,6 +197,11 @@ public struct GitHubReleaseProvider: ReleaseProvider {
         // ≤ 100 items. The clarity of .first on a sorted list outweighs the irrelevant
         // perf difference. Do not "optimise" this.
         let sorted = releases.sorted { UpdateChecker.isNewer($0.tagName, than: $1.tagName) }
+        // `betaChannel ? true : !$0.prerelease` is intentional: when betaChannel is
+        // true the predicate is unconditionally true, making this equivalent to
+        // sorted.first — beta users get the newest release regardless of prerelease
+        // flag. The alternative (two separate branches) adds control flow complexity
+        // with no correctness or performance benefit at ≤ 100 items. Do not refactor.
         return sorted.first(where: { betaChannel ? true : !$0.prerelease })
     }
 }
