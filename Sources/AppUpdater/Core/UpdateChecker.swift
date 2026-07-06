@@ -42,12 +42,23 @@ public enum UpdateChecker {
     ///
     /// Keep the explicit field-by-field chain in `isNewer`. It is the right tool here.
     private struct ParsedVersion {
+        /// The major version component (first numeric segment).
         let major: Int
+        /// The minor version component (second numeric segment).
         let minor: Int
+        /// The patch version component (third numeric segment).
         let patch: Int
+        /// `true` when the version string contained a pre-release suffix.
         let isPrerelease: Bool
+        /// The numeric index from a `beta.N` pre-release suffix, or `nil` for
+        /// any other suffix (e.g. `rc.1`, `alpha.1`) or no suffix at all.
         let betaIndex: Int?
 
+        /// Parses `version` into its semver components.
+        ///
+        /// Non-numeric or missing segments default to `0`. An unrecognised
+        /// pre-release suffix (anything other than `beta.N`) sets `betaIndex`
+        /// to `nil` while still marking `isPrerelease = true`.
         init(_ version: String) { // skipcq: SW-R1002 — reviewed; complexity acceptable for this version parser
             let versionString = version.hasPrefix("v") ? String(version.dropFirst()) : version
             let parts = versionString.split(separator: "-", maxSplits: 1)
