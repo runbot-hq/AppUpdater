@@ -69,6 +69,26 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
+    /// Verifies that `evaluate` returns `.missingVersionKey` when
+    /// `currentVersion` is empty and a non-nil release was fetched.
+    ///
+    /// Pins the priority-order guarantee from the `evaluate` doc comment:
+    /// `.failed` is checked first, then `currentVersion.isEmpty`. A non-nil
+    /// `.fetched(release)` must not bypass the empty-version guard.
+    @Test func fetchedNonNilRelease_emptyVersion_returnsMissingVersionKey() throws {
+        let release = try #require(try firstRelease(fromFixture: "releases.newer"))
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(release),
+            currentVersion: ""
+        )
+        guard case .failed(let error) = result,
+              let checkError = error as? UpdateCheckError,
+              checkError == .missingVersionKey else {
+            Issue.record("Expected .failed(.missingVersionKey), got \(result)")
+            return
+        }
+    }
+
     // MARK: - Fixture: newer.json — v2.0.0, stable
 
     @Test func fixtureNewer_newerThan1x_decodesTagName() throws {

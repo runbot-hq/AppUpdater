@@ -152,9 +152,14 @@ public enum UpdateChecker {
         guard !currentVersion.isEmpty else {
             return .failed(UpdateCheckError.missingVersionKey)
         }
-        guard case .fetched(let release) = fetchResult, let release else {
+        // After the .failed early-return above, fetchResult is guaranteed to be
+        // .fetched(_). The guard below is structurally unreachable on its else
+        // branch — it exists only to bind `release` from the associated value.
+        guard case .fetched(let release) = fetchResult else {
+            // structurally unreachable
             return .upToDate
         }
+        guard let release else { return .upToDate }
         guard isNewer(release.tagName, than: currentVersion) else {
             return .upToDate
         }
