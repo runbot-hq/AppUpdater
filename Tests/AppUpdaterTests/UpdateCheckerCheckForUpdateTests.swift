@@ -18,7 +18,7 @@ struct UpdateCheckerCheckForUpdateTests {
     // MARK: - Fixture helpers
 
     /// Loads the JSON at `Fixtures/<name>.json` via `Bundle.module` and
-    /// decodes it as `[Release]`.
+    /// decodes it as `[FixtureRelease]`.
     private func loadFixture(
         named name: String
     ) throws -> [FixtureRelease] {
@@ -50,18 +50,16 @@ struct UpdateCheckerCheckForUpdateTests {
     // MARK: - missingVersionKey
 
     /// Verifies that `evaluate` returns `.missingVersionKey` when
-    /// `currentVersion` is empty and no fetch failure occurred.
+    /// `currentVersion` is empty and the fetch succeeded (no failure).
     ///
-    /// Calls `evaluate` directly (not the public `checkForUpdate`) so the test
-    /// is purely synchronous and never touches the network. The public
-    /// `checkForUpdate` makes a real network request in CI which would fail,
-    /// and with the `fetchFailed` priority fix that would return
-    /// `.noReleasesFound` instead — masking this path entirely.
+    /// Calls `evaluate` directly with `.fetched(nil)` — purely synchronous,
+    /// no network. The public `checkForUpdate` makes a real network request
+    /// which fails in CI, and `.failed` takes priority over `.missingVersionKey`,
+    /// so the public entry point cannot be used to test this path.
     @Test func emptyCurrentVersion_returnsMissingVersionKey() {
         let result = UpdateChecker.evaluate(
-            availableRelease: nil,
-            currentVersion: "",
-            fetchFailed: false
+            fetchResult: .fetched(nil),
+            currentVersion: ""
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,

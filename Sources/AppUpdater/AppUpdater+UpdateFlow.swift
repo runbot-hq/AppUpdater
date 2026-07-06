@@ -29,9 +29,9 @@ extension AppUpdater {
 
     /// Runs a channel-aware update check via the injected `ReleaseProvider`.
     ///
-    /// Uses `UpdateChecker.evaluate` so that no-channel-match (`.fetched(nil)`)
-    /// correctly maps to `.upToDate` and a fetch failure (`.failed`) correctly
-    /// maps to `.failed(.noReleasesFound)`.
+    /// Passes the raw `ReleaseFetchResult` directly into `UpdateChecker.evaluate`
+    /// so the mapping from fetch outcome to `UpdateCheckResult` is owned entirely
+    /// by `evaluate` with no intermediate deconstruction.
     ///
     /// Intentionally `internal` — `checkAndHandle` is the designed public
     /// entry point for host apps.
@@ -41,20 +41,7 @@ extension AppUpdater {
             betaChannel: betaChannel,
             assetName: assetName
         )
-        switch fetchResult {
-        case .failed:
-            return UpdateChecker.evaluate(
-                availableRelease: nil,
-                currentVersion: currentVersion,
-                fetchFailed: true
-            )
-        case .fetched(let release):
-            return UpdateChecker.evaluate(
-                availableRelease: release,
-                currentVersion: currentVersion,
-                fetchFailed: false
-            )
-        }
+        return UpdateChecker.evaluate(fetchResult: fetchResult, currentVersion: currentVersion)
     }
 
     // MARK: - Handle

@@ -108,56 +108,51 @@ public enum UpdateChecker {
         return false
     }
 
-    /// Maps a fetched `AvailableRelease?` to an `UpdateCheckResult`.
+    /// Maps a `ReleaseFetchResult` to an `UpdateCheckResult`.
     ///
     /// This is the pure comparison layer — no network I/O.
     ///
     /// ## Access
     ///
     /// Intentionally `internal`, not `public`. Reached by `AppUpdater+UpdateFlow`
-    /// and indirectly by tests via `updater.checkForUpdate`. ❌ DO NOT make public:
-    /// the `evaluate` signature is an implementation detail; external callers must
-    /// go through `checkForUpdate`.
+    /// and directly by tests via `@testable import`. ❌ DO NOT make public:
+    /// the `evaluate` signature is an implementation detail; external callers
+    /// must go through `checkForUpdate`.
+    ///
+    /// ## Why `ReleaseFetchResult` not `(AvailableRelease?, Bool)`
+    ///
+    /// The previous signature `(availableRelease: AvailableRelease?, fetchFailed: Bool)`
+    /// allowed callers to pass a non-nil release alongside `fetchFailed: true` —
+    /// a structurally inconsistent state that compiled fine but silently discarded
+    /// the release. Taking `ReleaseFetchResult` directly makes inconsistent states
+    /// impossible at the type level and collapses both call sites from a switch +
+    /// two evaluate calls into a single call.
     ///
     /// ## Priority order
     ///
-    /// `fetchFailed` is checked before `currentVersion.isEmpty` so that a host
-    /// app with an empty version string does not mask a real network failure
-    /// with a misleading `.missingVersionKey` error. If both conditions are
-    /// true, the network failure is the actionable signal.
+    /// `.failed` is handled before the `currentVersion.isEmpty` check so that a
+    /// host app with an empty version string does not mask a real network failure
+    /// with a misleading `.missingVersionKey` error.
     ///
     /// ## Return values
     ///
-    /// - `.failed(.noReleasesFound)` — `fetchFailed` is `true`. Checked first;
-    ///   a real network failure takes priority over a misconfigured host app.
+    /// - `.failed(.noReleasesFound)` — `fetchResult` is `.failed`.
     /// - `.failed(.missingVersionKey)` — `currentVersion` is empty (and fetch
     ///   did not fail).
-    /// - `.upToDate` — `availableRelease` is `nil` (no channel match, fetch
-    ///   succeeded) or not newer than `currentVersion`.
-    /// - `.updateAvailable` — `availableRelease` is newer than `currentVersion`.
-    ///
-    /// ## fetchFailed vs nil
-    ///
-    /// `nil` from the provider has two meanings:
-    /// - Fetch/decode failure (`fetchFailed: true`) → `.failed(.noReleasesFound)`
-    /// - No channel match (`fetchFailed: false`) → `.upToDate`
-    ///
-    /// Callers derive `fetchFailed` from `ReleaseFetchResult` — never from
-    /// `availableRelease == nil` alone.
+    /// - `.upToDate` — `fetchResult` is `.fetched(nil)` (no channel match) or
+    ///   the fetched release is not newer than `currentVersion`.
+    /// - `.updateAvailable` — fetched release is newer than `currentVersion`.
     static func evaluate(
-        availableRelease: AvailableRelease?,
-        currentVersion: String,
-        fetchFailed: Bool
+        fetchResult: ReleaseFetchResult,
+        currentVersion: String
     ) -> UpdateCheckResult {
-        // ❌ DO NOT reorder these guards. fetchFailed must be checked first.
-        // See "Priority order" in the doc comment above.
-        if fetchFailed {
+        if case .failed = fetchResult {
             return .failed(UpdateCheckError.noReleasesFound)
         }
         guard !currentVersion.isEmpty else {
             return .failed(UpdateCheckError.missingVersionKey)
         }
-        guard let release = availableRelease else {
+        guard case .fetched(let release) = fetchResult, let release else {
             return .upToDate
         }
         guard isNewer(release.tagName, than: currentVersion) else {
@@ -194,11 +189,6 @@ public enum UpdateChecker {
             betaChannel: betaChannel,
             assetName: assetName
         )
-        switch fetchResult {
-        case .failed:
-            return evaluate(availableRelease: nil, currentVersion: currentVersion, fetchFailed: true)
-        case .fetched(let release):
-            return evaluate(availableRelease: release, currentVersion: currentVersion, fetchFailed: false)
-        }
+        return evaluate(fetchResult: fetchResult, currentVersion: currentVersion)
     }
 }
