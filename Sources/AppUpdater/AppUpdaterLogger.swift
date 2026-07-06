@@ -1,4 +1,4 @@
-// AppUpdater+Logging.swift
+// AppUpdaterLogger.swift
 // AppUpdater
 import Foundation
 import os

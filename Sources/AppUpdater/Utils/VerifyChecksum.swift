@@ -1,4 +1,4 @@
-// SHA256Verification.swift
+// VerifyChecksum.swift
 // AppUpdater
 import CryptoKit
 import Foundation

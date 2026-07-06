@@ -1,4 +1,4 @@
-// UpdateStateProviding.swift
+// UpdateState.swift
 // AppUpdater
 import Foundation
 
