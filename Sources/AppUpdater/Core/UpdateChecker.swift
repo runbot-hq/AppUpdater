@@ -18,9 +18,13 @@ public enum UpdateChecker {
         let prerelease: Bool
         /// The binary assets attached to this release.
         let assets: [ReleaseAsset]
+        /// Maps Swift property names to the GitHub API's snake_case JSON keys.
         enum CodingKeys: String, CodingKey {
+            /// Maps to the GitHub API JSON key `"tag_name"`.
             case tagName = "tag_name"
+            /// Maps to the JSON key `"prerelease"`.
             case prerelease
+            /// Maps to the JSON key `"assets"`.
             case assets
         }
     }
@@ -42,12 +46,23 @@ public enum UpdateChecker {
     ///   correctly — a naive `betaIndex ?? -1` pattern introduces subtle ordering bugs.
     /// - The gain is cosmetic. Keep the explicit field-by-field chain in `isNewer`.
     private struct ParsedVersion {
+        /// The major version component (first numeric segment).
         let major: Int
+        /// The minor version component (second numeric segment).
         let minor: Int
+        /// The patch version component (third numeric segment).
         let patch: Int
+        /// `true` when the version string contained a pre-release suffix.
         let isPrerelease: Bool
+        /// The numeric index from a `beta.N` pre-release suffix, or `nil` for
+        /// any other suffix (e.g. `rc.1`, `alpha.1`) or no suffix at all.
         let betaIndex: Int?
 
+        /// Parses `version` into its semver components.
+        ///
+        /// Non-numeric or missing segments default to `0`. An unrecognised
+        /// pre-release suffix (anything other than `beta.N`) sets `betaIndex`
+        /// to `nil` while still marking `isPrerelease = true`.
         init(_ version: String) { // skipcq: SW-R1002 — reviewed; complexity acceptable for this version parser
             let versionString = version.hasPrefix("v") ? String(version.dropFirst()) : version
             let parts = versionString.split(separator: "-", maxSplits: 1)
@@ -74,10 +89,18 @@ public enum UpdateChecker {
 
     /// Builds a `URLRequest` for the releases endpoint of `repo`.
     ///
+    /// `perPage` is clamped to `1...100` (GitHub's documented maximum for this
+    /// endpoint). A single request is made — no pagination.
+    ///
     /// ## ⚠️ 100-release ceiling
     ///
-    /// Makes exactly one request with `per_page=100`. If a repository has
-    /// published more than 100 releases the oldest ones are never seen.
+    /// `fetchAndDecodeReleases` makes exactly one request with `per_page=100`.
+    /// If a repository has published more than 100 releases the oldest releases
+    /// (by GitHub's default sort, newest first) are never seen. For most repos
+    /// this is not a problem — the newest release is always in the first page.
+    /// However if you publish hotfixes to old branches and those appear after
+    /// the 100th entry you may miss them. See README "Known limitations" for
+    /// the recommended mitigation (keep releases ≤ 100, or draft/delete old ones).
     private static func buildRequest(repo: String, perPage: Int) -> URLRequest? {
         let clampedPerPage = min(max(perPage, 1), 100)
         let releasesURLString = "https://api.github.com/repos/\(repo)/releases"
@@ -95,7 +118,11 @@ public enum UpdateChecker {
 
     /// Fetches and decodes the releases list for `repo`.
     ///
-    /// Returns `nil` on any network, HTTP, or JSON-decode failure.
+    /// Returns `nil` on any network, HTTP, or JSON-decode failure. An empty
+    /// array means the repository exists but has no published releases.
+    /// This is intentionally separate from channel filtering — a `nil` return
+    /// here means "we could not determine the release list", whereas an empty
+    /// filtered result means "releases exist but none match the channel".
     private static func fetchAndDecodeReleases(repo: String) async -> [Release]? {
         guard let request = buildRequest(repo: repo, perPage: 100) else { return nil }
 
@@ -119,13 +146,18 @@ public enum UpdateChecker {
     /// Sorts `releases` by semver (newest first) and returns the first entry
     /// that matches `betaChannel`.
     ///
-    /// Returns `nil` when no release matches the channel filter.
+    /// Returns `nil` when no release matches the channel filter — i.e. the
+    /// caller is on the stable channel and every release is a pre-release.
+    /// This `nil` means **no channel match**, not a fetch failure; the two
+    /// cases are kept separate so callers can map them to different outcomes
+    /// (`.upToDate` vs `.failed`).
     private static func latestMatchingRelease(
         from releases: [Release],
         betaChannel: Bool
     ) -> Release? {
         // Sorted rather than max-scan by design — runs at most once per 24 hours on
-        // ≤ 100 items. Do not "optimise" this.
+        // ≤ 100 items. The clarity of .first on a sorted list outweighs the irrelevant
+        // perf difference. Do not "optimise" this.
         let sorted = releases.sorted { isNewer($0.tagName, than: $1.tagName) }
         return sorted.first(where: { betaChannel ? true : !$0.prerelease })
     }
