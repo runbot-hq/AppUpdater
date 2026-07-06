@@ -18,22 +18,14 @@ public enum UpdateChecker {
         let prerelease: Bool
         /// The binary assets attached to this release.
         let assets: [ReleaseAsset]
-        /// Maps Swift property names to the GitHub API's snake_case JSON keys.
         enum CodingKeys: String, CodingKey {
-            /// Maps to the GitHub API JSON key `"tag_name"`.
             case tagName = "tag_name"
-            /// Maps to the JSON key `"prerelease"`.
             case prerelease
-            /// Maps to the JSON key `"assets"`.
             case assets
         }
     }
 
     /// A parsed representation of a semver version string used internally by `isNewer`.
-    ///
-    /// Strips the leading `"v"` if present, splits on `"-"` to separate the
-    /// core version from any pre-release suffix, and extracts a `betaIndex`
-    /// for `beta.N` labels so beta versions can be ordered numerically.
     ///
     /// ❌ DO NOT add `Comparable` conformance to this type.
     ///
@@ -46,34 +38,16 @@ public enum UpdateChecker {
     ///   There is exactly one call site (`isNewer`) and the manual comparison
     ///   chain there is already short and readable.
     /// - `Comparable` requires a total order. `betaIndex` is `Optional<Int>`,
-    ///   and the correct semantics for `nil` vs `nil` (treat as equal, not less-than)
-    ///   are non-obvious to implement correctly — a naive `betaIndex ?? -1` pattern
-    ///   introduces subtle ordering bugs that the current explicit chain cannot.
-    /// - The gain is cosmetic (two call sites become marginally shorter). The
-    ///   existing tests pin the full observable behaviour of `isNewer`; any
-    ///   `Comparable` implementation that diverges will be caught, but the
-    ///   risk of a subtle regression in `nil`-betaIndex tie-breaking is not
-    ///   worth the cosmetic saving.
-    ///
-    /// Keep the explicit field-by-field chain in `isNewer`. It is the right tool here.
+    ///   and the correct semantics for `nil` vs `nil` are non-obvious to implement
+    ///   correctly — a naive `betaIndex ?? -1` pattern introduces subtle ordering bugs.
+    /// - The gain is cosmetic. Keep the explicit field-by-field chain in `isNewer`.
     private struct ParsedVersion {
-        /// The major version component (first numeric segment).
         let major: Int
-        /// The minor version component (second numeric segment).
         let minor: Int
-        /// The patch version component (third numeric segment).
         let patch: Int
-        /// `true` when the version string contained a pre-release suffix.
         let isPrerelease: Bool
-        /// The numeric index from a `beta.N` pre-release suffix, or `nil` for
-        /// any other suffix (e.g. `rc.1`, `alpha.1`) or no suffix at all.
         let betaIndex: Int?
 
-        /// Parses `version` into its semver components.
-        ///
-        /// Non-numeric or missing segments default to `0`. An unrecognised
-        /// pre-release suffix (anything other than `beta.N`) sets `betaIndex`
-        /// to `nil` while still marking `isPrerelease = true`.
         init(_ version: String) { // skipcq: SW-R1002 — reviewed; complexity acceptable for this version parser
             let versionString = version.hasPrefix("v") ? String(version.dropFirst()) : version
             let parts = versionString.split(separator: "-", maxSplits: 1)
@@ -100,18 +74,10 @@ public enum UpdateChecker {
 
     /// Builds a `URLRequest` for the releases endpoint of `repo`.
     ///
-    /// `perPage` is clamped to `1...100` (GitHub's documented maximum for this
-    /// endpoint). A single request is made — no pagination.
-    ///
     /// ## ⚠️ 100-release ceiling
     ///
-    /// `fetchAndDecodeReleases` makes exactly one request with `per_page=100`.
-    /// If a repository has published more than 100 releases the oldest releases
-    /// (by GitHub's default sort, newest first) are never seen. For most repos
-    /// this is not a problem — the newest release is always in the first page.
-    /// However if you publish hotfixes to old branches and those appear after
-    /// the 100th entry you may miss them. See README "Known limitations" for
-    /// the recommended mitigation (keep releases ≤ 100, or draft/delete old ones).
+    /// Makes exactly one request with `per_page=100`. If a repository has
+    /// published more than 100 releases the oldest ones are never seen.
     private static func buildRequest(repo: String, perPage: Int) -> URLRequest? {
         let clampedPerPage = min(max(perPage, 1), 100)
         let releasesURLString = "https://api.github.com/repos/\(repo)/releases"
@@ -129,11 +95,7 @@ public enum UpdateChecker {
 
     /// Fetches and decodes the releases list for `repo`.
     ///
-    /// Returns `nil` on any network, HTTP, or JSON-decode failure. An empty
-    /// array means the repository exists but has no published releases.
-    /// This is intentionally separate from channel filtering — a `nil` return
-    /// here means "we could not determine the release list", whereas an empty
-    /// filtered result means "releases exist but none match the channel".
+    /// Returns `nil` on any network, HTTP, or JSON-decode failure.
     private static func fetchAndDecodeReleases(repo: String) async -> [Release]? {
         guard let request = buildRequest(repo: repo, perPage: 100) else { return nil }
 
@@ -157,48 +119,15 @@ public enum UpdateChecker {
     /// Sorts `releases` by semver (newest first) and returns the first entry
     /// that matches `betaChannel`.
     ///
-    /// Returns `nil` when no release matches the channel filter — i.e. the
-    /// caller is on the stable channel and every release is a pre-release.
-    /// This `nil` means **no channel match**, not a fetch failure; the two
-    /// cases are kept separate so callers can map them to different outcomes
-    /// (`.upToDate` vs `.failed`).
+    /// Returns `nil` when no release matches the channel filter.
     private static func latestMatchingRelease(
         from releases: [Release],
         betaChannel: Bool
     ) -> Release? {
         // Sorted rather than max-scan by design — runs at most once per 24 hours on
-        // ≤ 100 items. The clarity of .first on a sorted list outweighs the irrelevant
-        // perf difference. Do not "optimise" this.
+        // ≤ 100 items. Do not "optimise" this.
         let sorted = releases.sorted { isNewer($0.tagName, than: $1.tagName) }
         return sorted.first(where: { betaChannel ? true : !$0.prerelease })
-    }
-
-    /// Returns an `AvailableRelease` for the latest release matching `betaChannel`,
-    /// or `nil` if the fetch failed or no release matched the channel.
-    ///
-    /// This is the lower-level fetch primitive used by `GitHubReleaseProvider`.
-    /// Unlike `checkForUpdate`, it does not perform a semver comparison against
-    /// `currentVersion` — it simply returns the latest eligible release from the
-    /// API, or `nil` on any failure (network, HTTP, decode, or no channel match).
-    ///
-    /// Callers that need to distinguish "fetch failed" from "no channel match"
-    /// should use `checkForUpdate` instead, which maps these to `.failed` and
-    /// `.upToDate` respectively.
-    static func fetchLatestAvailableRelease(
-        repo: String,
-        betaChannel: Bool,
-        assetName: (String) -> String
-    ) async -> AvailableRelease? {
-        guard let releases = await fetchAndDecodeReleases(repo: repo) else { return nil }
-        guard let latest = latestMatchingRelease(from: releases, betaChannel: betaChannel)
-        else { return nil }
-        let checksumAssetName = assetName(latest.tagName) + ".sha256"
-        let checksumAsset = latest.assets.first(where: { $0.name == checksumAssetName })
-        return AvailableRelease(
-            tagName: latest.tagName,
-            assets: latest.assets,
-            checksumURL: checksumAsset?.browserDownloadURL
-        )
     }
 
     /// Returns `true` when `candidate` is strictly newer than `current` using
@@ -206,44 +135,10 @@ public enum UpdateChecker {
     ///
     /// ## Supported tag format
     ///
-    /// AppUpdater supports exactly two tag shapes:
-    ///   - Stable releases:   `vMAJOR.MINOR.PATCH`           (e.g. `v1.2.3`)
-    ///   - Beta pre-releases: `vMAJOR.MINOR.PATCH-beta.N`    (e.g. `v1.2.3-beta.4`)
-    ///
-    /// These are the only formats produced by the RunBot publish pipeline and
-    /// the only formats this function is designed to handle. Using this library
-    /// with tags outside this shape (e.g. `rc.1`, `alpha.1`, CalVer, build
-    /// metadata suffixes) is outside the supported contract. If your pipeline
-    /// uses a different tag convention, adapt the convention — do not extend
-    /// this parser.
+    /// - Stable:  `vMAJOR.MINOR.PATCH`        (e.g. `v1.2.3`)
+    /// - Beta:    `vMAJOR.MINOR.PATCH-beta.N` (e.g. `v1.2.3-beta.4`)
     ///
     /// ❌ DO NOT add support for `rc.N`, `alpha.N`, or arbitrary pre-release labels.
-    ///
-    /// A reviewer may propose extending `ParsedVersion` to handle `rc.N` or
-    /// `alpha.N` so that `isNewer` returns a meaningful ordering for those
-    /// suffixes rather than `false`. This is permanently rejected:
-    ///
-    /// - The library has a defined tag contract (see above). Consumers who do
-    ///   not follow it get undefined behaviour — that is correct and intentional.
-    ///   The library's job is not to accommodate every possible tagging scheme.
-    /// - Adding more suffix types adds parser complexity, more `betaIndex`-style
-    ///   fields, and new ordering edge cases (how does `rc.1` compare to `beta.2`?
-    ///   Is `alpha < beta < rc < stable`? Different projects answer differently).
-    /// - Silent `false` for an unrecognised suffix is a safe, predictable
-    ///   failure mode. The worst outcome is "update not offered" — not a
-    ///   wrong-version install or a crash.
-    ///
-    /// If this is raised in review again, point the reviewer here.
-    ///
-    /// ## Constraints
-    ///
-    /// Pre-release ordering is supported **only for `beta.N` labels** (e.g.
-    /// `v0.8.0-beta.2` is newer than `v0.8.0-beta.1`). Any other pre-release
-    /// suffix — such as `rc.1`, `alpha.1`, or an arbitrary string — is parsed
-    /// with `betaIndex == nil`. When both versions share the same
-    /// `major.minor.patch` and at least one has a non-`beta.N` pre-release
-    /// label, the `if let ci, let si` guard falls through and this function
-    /// returns `false`.
     public static func isNewer(_ candidate: String, than current: String) -> Bool { // skipcq: SW-R1002 — reviewed; complexity acceptable for this semver comparison
         let cv = ParsedVersion(candidate)
         let sv = ParsedVersion(current)
@@ -260,18 +155,17 @@ public enum UpdateChecker {
 
     /// Checks for an available update for `repo`.
     ///
+    /// This is the single authoritative fetch+filter+compare path.
+    /// `GitHubReleaseProvider.fetchLatestRelease` calls this and maps the
+    /// result — there is no separate fetch primitive.
+    ///
     /// ## Return values
     ///
-    /// - `.upToDate` — the latest eligible release is not newer than
-    ///   `currentVersion`, **or** releases were fetched successfully but none
-    ///   matched the requested channel (e.g. `betaChannel: false` and the
-    ///   repository only has pre-releases). In both cases the caller is already
-    ///   on the latest version they are eligible for.
+    /// - `.upToDate` — latest eligible release is not newer than `currentVersion`,
+    ///   or releases were fetched successfully but none matched the channel.
     /// - `.updateAvailable` — a newer eligible release was found.
     /// - `.failed(.missingVersionKey)` — `currentVersion` is empty.
-    /// - `.failed(.noReleasesFound)` — the releases API request failed, the
-    ///   HTTP response was non-200, or the response body could not be decoded.
-    ///   This does **not** mean "no channel match" — see `.upToDate` above.
+    /// - `.failed(.noReleasesFound)` — fetch, HTTP, or decode failure.
     public static func checkForUpdate(
         repo: String,
         currentVersion: String,
@@ -282,23 +176,13 @@ public enum UpdateChecker {
             return .failed(UpdateCheckError.missingVersionKey)
         }
 
-        // Step 1: fetch and decode. nil here means a genuine fetch/decode failure.
         guard let releases = await fetchAndDecodeReleases(repo: repo) else {
             return .failed(UpdateCheckError.noReleasesFound)
         }
 
-        // Step 2: filter by channel.
-        // ✅ REVIEWED: nil here maps to .upToDate, NOT .failed — this is
-        // deliberate. nil from latestMatchingRelease means releases were
-        // fetched successfully but none matched the requested channel (e.g.
-        // the user is on the stable channel and every published release is a
-        // pre-release). That is not a failure — the user is on the latest
-        // version they are eligible for. A reviewer may flag this as "swallows
-        // a no-match condition silently" — it does not. The distinction is
-        // documented in the UpdateCheckError.noReleasesFound doc comment and
-        // in the checkForUpdate return-value docs above. Do not change this
-        // to .failed — that would incorrectly show an error state to stable
-        // users on a beta-only repository.
+        // ✅ REVIEWED: nil here maps to .upToDate, NOT .failed — releases were
+        // fetched successfully but none matched the channel. That is not a
+        // failure — the user is on the latest version they are eligible for.
         guard let release = latestMatchingRelease(from: releases, betaChannel: betaChannel) else {
             return .upToDate
         }
