@@ -34,12 +34,13 @@ extension AppUpdater {
     ///
     /// ## Flow
     /// 1. Verify host is in `.ready` phase and extract zip URL + version.
-    /// 2. Unzip into a temporary directory via `/usr/bin/ditto`.
-    /// 3. (Optional) Verify `codesign` identity if `skipCodeSignValidation` is `false`.
-    /// 4. Replace the running bundle via `FileManager.replaceItemAt` (atomic swap).
-    /// 5. Relaunch the new binary with `/usr/bin/open -n`.
-    /// 6. Delete the zip (spend — relaunch confirmed).
-    /// 7. Terminate this process via `NSApp.terminate`.
+    /// 2. Re-validate the cached version against GitHub (yank-revalidation).
+    /// 3. Unzip into a temporary directory via `/usr/bin/ditto`.
+    /// 4. (Optional) Verify `codesign` identity if `skipCodeSignValidation` is `false`.
+    /// 5. Replace the running bundle via `FileManager.replaceItemAt` (atomic swap).
+    /// 6. Relaunch the new binary with `/usr/bin/open -n`.
+    /// 7. Delete the zip (spend — relaunch confirmed).
+    /// 8. Terminate this process via `NSApp.terminate`.
     ///
     /// On any failure `state.apply(.failed(version:))` is called and the
     /// function returns without terminating.
@@ -54,6 +55,54 @@ extension AppUpdater {
             state.apply(.failed(version: nil))
             return
         }
+
+        // ── Yank revalidation ────────────────────────────────────────────────
+        // Before touching the zip, confirm with GitHub that the cached version
+        // is still the latest eligible release.
+        //
+        // Decision table (industry-standard optimistic-on-failure convention,
+        // matching Sparkle and Squirrel behaviour):
+        //
+        //   .failed                          → proceed (network unreachable,
+        //                                       GitHub down, or rate-limited;
+        //                                       not evidence of a yank)
+        //   .fetched(nil)                    → proceed (no channel match is not
+        //                                       a yank; treat as inconclusive)
+        //   .fetched(r) where r.tag == ver   → proceed (GitHub confirms current)
+        //   .fetched(r) where r.tag != ver   → abort (GitHub explicitly returned
+        //                                       a different latest tag; the cached
+        //                                       zip is stale or yanked)
+        //
+        // The zip was already SHA-256 verified at download time. A reachability
+        // failure at install time is not evidence that the binary is bad.
+        //
+        // ❌ DO NOT change .failed or .fetched(nil) to abort — that degrades
+        // install UX for users on poor connectivity or during a GitHub outage.
+        // The only actionable signal is a confirmed different tag.
+        let betaChannel = betaChannelProvider()
+        let revalidation = await provider.fetchLatestRelease(
+            repo: repo,
+            betaChannel: betaChannel,
+            assetName: assetName
+        )
+        if case .fetched(let latest) = revalidation,
+           let latest,
+           latest.tagName != version {
+            // GitHub confirmed a different latest tag — the cached zip is stale
+            // or yanked. Wipe the zip and reset to idle so the next check cycle
+            // picks up the real current release.
+            appUpdaterLogger.warning(
+                "yank-revalidation: cached version \(version, privacy: .public) "
+                + "superseded by \(latest.tagName, privacy: .public) — wiping zip and resetting to idle"
+            )
+            isInstalling = false
+            withZipURL { zipURL in
+                try? FileManager.default.removeItem(at: zipURL)
+            }
+            state.apply(.idle)
+            return
+        }
+        // ────────────────────────────────────────────────────────────────────
 
         // ⚠️ skipCodeSignValidation is true — code-sign identity check is disabled.
         // Install will proceed on SHA-256 integrity alone.
