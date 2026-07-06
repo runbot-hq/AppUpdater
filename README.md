@@ -1,3 +1,5 @@
+<img width="120" alt="img" src="icon2_masked.png">
+
 # AppUpdater
 
 A Swift library that drives an in-app auto-update flow for macOS apps
