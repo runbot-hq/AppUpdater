@@ -51,24 +51,21 @@ public enum UpdateCheckError: Error, Sendable {
     /// The `currentVersion` string supplied to the checker was empty.
     case missingVersionKey
     /// The releases API request failed, the HTTP response was non-200, or
-    /// the response body could not be decoded. This does not mean
-    /// "no channel match" — when releases exist but none match the requested
-    /// channel the result is `.upToDate`, not this error.
+    /// the response body could not be decoded.
     ///
-    /// ⚠️ Known conflation: `GitHubReleaseProvider.fetchLatestRelease`
-    /// returns `nil` for both a genuine network failure AND a successful
-    /// fetch where no release matched the channel. The instance-level
-    /// `AppUpdater.checkForUpdate` maps both to this case. In practice
-    /// this means: if a user disables beta channel and no stable release
-    /// exists yet, the background scheduler treats it as a network failure
-    /// and preserves `.ready` state rather than clearing it. This is an
-    /// accepted limitation — RunBot always has stable releases, so the
-    /// degenerate case (beta-only repo, user on stable channel) does not
-    /// apply. If that ever changes, split the nil return into a typed
-    /// result so the two cases can be handled separately.
+    /// This does **not** mean "no channel match". Since PR #22 introduced
+    /// `ReleaseFetchResult`, the two previously conflated nil cases are now
+    /// structurally distinct:
+    /// - `.failed` (network/HTTP/decode error) → `UpdateCheckError.noReleasesFound`
+    /// - `.fetched(nil)` (fetch succeeded, no release matched the channel) → `.upToDate`
     ///
-    /// Known limitation: nil is returned for network errors, rate-limits (HTTP 429/403),
-    /// and genuine no-match — all three become .failed(.noReleasesFound). The UI cannot
-    /// distinguish "offline" from "up to date". Tracked in issue #1878.
+    /// If you are reading this comment because you see `.noReleasesFound` and
+    /// suspect a channel-match miss: check `GitHubReleaseProvider.latestMatchingRelease`
+    /// and the `betaChannel` flag instead — that path now returns `.fetched(nil)`,
+    /// not `.failed`.
+    ///
+    /// Known limitation: network errors, rate-limits (HTTP 429/403), and decode
+    /// failures all map to this same case. The UI cannot distinguish "offline"
+    /// from a hard API failure. Tracked in issue #1878.
     case noReleasesFound
 }

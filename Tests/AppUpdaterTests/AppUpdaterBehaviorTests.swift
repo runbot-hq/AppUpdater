@@ -6,7 +6,7 @@ import Testing
 
 // MARK: - AppUpdaterBehaviorTests
 
-/// Exercises `AppUpdater.handle` decision paths that don’t require the network.
+/// Exercises `AppUpdater.handle` decision paths that don't require the network.
 @MainActor
 @Suite("AppUpdater.handle")
 struct AppUpdaterBehaviorTests {
@@ -38,7 +38,7 @@ struct AppUpdaterBehaviorTests {
     /// `.available` again: the zip already exists at `fixedZipURL` by the time the
     /// second call arrives, so it fast-paths directly to `.ready`.
     ///
-    /// We simulate the “already cached” condition by writing a dummy file at
+    /// We simulate the "already cached" condition by writing a dummy file at
     /// `fixedZipURL` before calling `handle`.
     @Test func cachedZipAdvancesDirectlyToReady() async throws {
         let domain = "test.cachehit.\(UUID().uuidString)"
@@ -125,11 +125,17 @@ struct AppUpdaterCheckAndHandleTests {
         AvailableRelease(tagName: tag, assets: [], checksumURL: nil)
     }
 
-    // MARK: - 1. Provider returns nil → .failed
+    // MARK: - 1. Provider returns .failed → .failed(.noReleasesFound)
 
+    /// A `.failed` fetch result (network error, HTTP error, or decode failure)
+    /// must map to `.failed(.noReleasesFound)` — not `.upToDate`.
+    ///
+    /// This is the structural change introduced by `ReleaseFetchResult`: a bare
+    /// `nil` from the old protocol was ambiguous between "fetch error" and
+    /// "no channel match". The new enum makes the distinction explicit.
     @Test func providerReturnsNil_failedNoReleasesFound() async throws {
         let domain = "test.check.nil.\(UUID().uuidString)"
-        let provider = MockReleaseProvider(releaseToReturn: nil)
+        let provider = MockReleaseProvider(fetchResultToReturn: .failed)
         let updater = makeUpdater(domain: domain, provider: provider)
 
         let result = await updater.checkForUpdate(betaChannel: false)
@@ -138,6 +144,24 @@ struct AppUpdaterCheckAndHandleTests {
               let checkError = error as? UpdateCheckError,
               checkError == .noReleasesFound else {
             Issue.record("Expected .failed(.noReleasesFound), got \(result)")
+            return
+        }
+    }
+
+    // MARK: - 1b. Provider returns .fetched(nil) → .upToDate
+
+    /// A `.fetched(nil)` result means the API call succeeded but no release
+    /// matched the channel filter (e.g. a stable user on a beta-only repo).
+    /// This must map to `.upToDate`, not `.failed`.
+    @Test func providerReturnsFetchedNil_upToDate() async throws {
+        let domain = "test.check.fetchednil.\(UUID().uuidString)"
+        let provider = MockReleaseProvider(fetchResultToReturn: .fetched(nil))
+        let updater = makeUpdater(domain: domain, provider: provider)
+
+        let result = await updater.checkForUpdate(betaChannel: false)
+
+        guard case .upToDate = result else {
+            Issue.record("Expected .upToDate for no-channel-match, got \(result)")
             return
         }
     }
