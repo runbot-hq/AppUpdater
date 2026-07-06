@@ -6,7 +6,7 @@ import Testing
 
 // MARK: - AppUpdaterDefaultsTests
 
-/// Smoke-tests for `AppUpdater` static configuration.
+/// Smoke-tests for `AppUpdater` instance configuration defaults.
 ///
 /// `AppUpdaterDefaults` and `rehydrateCachedUpdateIfNewer` were removed in the
 /// AppUpdater library-extraction refactor (issue #1860). The scoped
@@ -16,22 +16,46 @@ import Testing
 @MainActor
 struct AppUpdaterDefaultsTests {
 
+    // MARK: - Helpers
+
+    /// A minimal `AppUpdater` constructed with all defaults.
+    private func makeUpdater() -> AppUpdater {
+        AppUpdater(
+            repo: "owner/repo",
+            currentVersion: "1.0.0",
+            assetName: { _ in "App.zip" },
+            schedulerIdentifier: "com.test.defaults"
+        )
+    }
+
     // MARK: - checkInterval
 
-    /// `AppUpdater.checkInterval` must be a positive `TimeInterval`.
+    /// `checkInterval` must be a positive `TimeInterval`.
     @Test func checkInterval_isPositive() {
-        #expect(AppUpdater.checkInterval > 0)
+        #expect(makeUpdater().checkInterval > 0)
     }
 
     #if DEBUG
     /// In DEBUG builds the interval defaults to 60 seconds for fast QA cycles.
     @Test func checkInterval_debug_defaultIs60Seconds() {
-        #expect(AppUpdater.checkInterval == 60)
+        #expect(makeUpdater().checkInterval == 60)
     }
     #else
-    /// In release builds the interval is 24 hours.
+    /// In release builds the interval defaults to 24 hours.
     @Test func checkInterval_release_is24Hours() {
-        #expect(AppUpdater.checkInterval == 24 * 60 * 60)
+        #expect(makeUpdater().checkInterval == 24 * 60 * 60)
     }
     #endif
+
+    /// A custom value passed at init is reflected on the instance.
+    @Test func checkInterval_customValue_isRespected() {
+        let updater = AppUpdater(
+            repo: "owner/repo",
+            currentVersion: "1.0.0",
+            assetName: { _ in "App.zip" },
+            schedulerIdentifier: "com.test.custom-interval",
+            checkInterval: 300
+        )
+        #expect(updater.checkInterval == 300)
+    }
 }
