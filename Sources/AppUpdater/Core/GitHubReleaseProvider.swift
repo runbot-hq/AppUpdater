@@ -137,6 +137,27 @@ public struct GitHubReleaseProvider: ReleaseProvider {
     /// Non-200 responses log both the status code and the raw response body
     /// (as UTF-8) at debug level so that 401/403/429 error messages from the
     /// GitHub API are visible during triage without requiring a proxy.
+    ///
+    /// ## ❌ DO NOT replace the per-call `URLSession` with a shared/stored session
+    ///
+    /// A reviewer may flag the ephemeral `URLSession` created per call as a
+    /// resource concern or suggest hoisting it to a stored property. This is
+    /// the wrong trade-off here:
+    ///
+    /// - `GitHubReleaseProvider` is a value type (`struct`) with no stored
+    ///   state. Adding a stored `URLSession` would require converting it to a
+    ///   `class` or `actor`, or introducing a `static` property — both of
+    ///   which add ownership and lifecycle complexity that doesn't pay for
+    ///   itself at a 24-hour call frequency.
+    /// - A new ephemeral session per call is the correct pattern for one-shot
+    ///   requests that are not latency-sensitive. `defer { session.finishTasksAndInvalidate() }`
+    ///   ensures prompt cleanup; there is no leak.
+    /// - `URLSessionConfiguration.ephemeral` intentionally disables the on-disk
+    ///   cache and credential store, which is the right policy for an
+    ///   unauthenticated one-shot API call — a shared `.default` session would
+    ///   silently enable both.
+    ///
+    /// The per-call session is intentional. Do not "optimise" it.
     private func fetchAndDecodeReleases(repo: String) async -> [Release]? {
         guard let request = buildRequest(repo: repo, perPage: 100) else { return nil }
 
