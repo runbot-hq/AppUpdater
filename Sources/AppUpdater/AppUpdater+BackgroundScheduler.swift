@@ -34,7 +34,7 @@ import Foundation
 extension AppUpdater {
 
     /// Registers an `NSBackgroundActivityScheduler` that fires a full update
-    /// check every `AppUpdater.checkInterval` seconds.
+    /// check every `self.checkInterval` seconds.
     ///
     /// Call once from the host's `AppDelegate` after the startup sequence
     /// completes.
@@ -45,8 +45,8 @@ extension AppUpdater {
         #if canImport(AppKit)
         let scheduler = NSBackgroundActivityScheduler(identifier: schedulerIdentifier)
         scheduler.repeats = true
-        scheduler.interval = AppUpdater.checkInterval
-        scheduler.tolerance = AppUpdater.checkInterval * 0.2
+        scheduler.interval = checkInterval
+        scheduler.tolerance = checkInterval * 0.2
         scheduler.qualityOfService = .background
 
         // NSBackgroundActivityScheduler is used deliberately here — do not
