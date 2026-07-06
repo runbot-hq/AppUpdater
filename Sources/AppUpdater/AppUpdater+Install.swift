@@ -46,6 +46,19 @@ extension AppUpdater {
     /// function returns without terminating.
     @MainActor
     public func installAndRelaunch(state: any UpdateStateProviding) async {
+        // The guard and the assignment below both execute synchronously on
+        // @MainActor before the first await (fetchLatestRelease). There is no
+        // suspension point between them, so no concurrent call can observe
+        // isInstalling == false after the guard passes and before it is set to
+        // true. The race-free guarantee comes from @MainActor isolation, not
+        // from a lock. Do not add a lock or an atomic here.
+        //
+        // AppUpdater is designed with a single call site for installAndRelaunch
+        // (the host's Install button, which the host disables while .ready is
+        // not the current phase). isInstalling is a belt-and-suspenders guard
+        // against a double-tap, not a multi-producer semaphore. If you are
+        // adding a second call site, confirm that the host disables it while
+        // isInstalling is true.
         guard !isInstalling else { return }
         isInstalling = true
 
@@ -86,6 +99,16 @@ extension AppUpdater {
         // where a channel change affects the result is .fetched(nil) (no channel
         // match for the new preference), which proceeds optimistically per the
         // table above. A mid-flight toggle cannot produce a spurious abort.
+        //
+        // Channel-toggle abort edge case: if the user was on stable, toggled to
+        // beta mid-flight, and GitHub returns the beta latest whose tag differs
+        // from the cached stable zip, the abort fires, the zip is wiped, and
+        // state resets to .idle. This is the CORRECT behaviour — the cached zip
+        // is genuinely stale from the new channel's perspective. The warning log
+        // is the triage signal. .idle is the right terminal state here for the
+        // same reason as any other yank abort: nothing was attempted, and the
+        // next scheduler cycle will re-fetch the right release for the new
+        // channel. Do not add a separate phase for this case.
         let betaChannel = betaChannelProvider()
         let revalidation = await provider.fetchLatestRelease(
             repo: repo,
