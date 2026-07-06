@@ -98,10 +98,11 @@ extension AppUpdater {
             // GitHub confirmed a different latest tag — the cached zip is stale
             // or yanked. Wipe the zip and reset to idle so the next check cycle
             // picks up the real current release.
-            appUpdaterLogger.warning(
-                "yank-revalidation: cached version \(version, privacy: .public) "
-                + "superseded by \(latest.tagName, privacy: .public) — wiping zip and resetting to idle"
-            )
+            //
+            // NOTE: os.Logger does not support + on OSLogMessage operands —
+            // the message must be a single string literal with all interpolations
+            // inline. Do not split this across multiple literals joined with +.
+            appUpdaterLogger.warning("yank-revalidation: cached version \(version, privacy: .public) superseded by \(latest.tagName, privacy: .public) — wiping zip and resetting to idle")
             isInstalling = false
             // removeItem runs synchronously on @MainActor via withZipURL —
             // this is intentional. The zip is always a local ~/Library/Caches
