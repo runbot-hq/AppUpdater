@@ -89,6 +89,26 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
+    /// Verifies that `.failed` takes priority over `currentVersion.isEmpty`.
+    ///
+    /// When both conditions hold — fetch failed AND `currentVersion` is empty —
+    /// `evaluate` must return `.failed(.noReleasesFound)`, not
+    /// `.failed(.missingVersionKey)`. This pins the priority-order guarantee
+    /// documented in the `evaluate` doc comment so a future refactor cannot
+    /// accidentally swap the order.
+    @Test func failedFetchResult_emptyVersion_returnsNoReleasesFound() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .failed,
+            currentVersion: ""
+        )
+        guard case .failed(let error) = result,
+              let checkError = error as? UpdateCheckError,
+              checkError == .noReleasesFound else {
+            Issue.record("Expected .failed(.noReleasesFound), got \(result)")
+            return
+        }
+    }
+
     // MARK: - Fixture: newer.json — v2.0.0, stable
 
     @Test func fixtureNewer_newerThan1x_decodesTagName() throws {

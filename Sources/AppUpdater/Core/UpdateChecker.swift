@@ -174,6 +174,22 @@ public enum UpdateChecker {
     /// the instance-level `checkForUpdate` which goes through the injected
     /// provider instead.
     ///
+    /// ## ❌ DO NOT remove the `GitHubReleaseProvider()` instantiation here
+    ///
+    /// This static method is a deliberate convenience entry point for one-shot
+    /// callers that have no `AppUpdater` instance (e.g. CLI tools, Previews).
+    /// It creates a `GitHubReleaseProvider` inline, which introduces a
+    /// compile-time dependency from `UpdateChecker` (business logic) to
+    /// `GitHubReleaseProvider` (network layer).
+    ///
+    /// This coupling is intentional and acceptable in the current single-target
+    /// structure. If `GitHubReleaseProvider` is ever moved to a separate Swift
+    /// Package target, this method must be updated (or moved to the new target)
+    /// at the same time — it will not compile otherwise. Do not attempt to
+    /// "fix" the coupling by injecting a `ReleaseProvider` parameter here;
+    /// that would break all existing one-shot call sites. Use the instance-level
+    /// `AppUpdater.checkForUpdate` if you need provider injection.
+    ///
     /// ## Return values
     ///
     /// - `.upToDate` — latest eligible release is not newer than `currentVersion`,
