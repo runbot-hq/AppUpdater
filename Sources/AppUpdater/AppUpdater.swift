@@ -93,18 +93,14 @@ public final class AppUpdater {
     /// The computed property retries on every access, so a transient failure
     /// self-heals on the next scheduler cycle.
     ///
-    /// ## ✅ Single-snapshot rule — do not call this twice in one operation
+    /// ## ✅ Use `withZipURL(_:)` at call sites — do not call this directly
     ///
-    /// Any call site that needs this URL for more than one step MUST snapshot
-    /// it once into a local `let` and use that local for all subsequent steps.
-    /// `handle()` does this: `let zipURL = fixedZipURL` — the same `zipURL`
-    /// is used for the step-1 existence check AND passed as `destination` into
-    /// `downloadUpdate`. This guarantees both operations target the exact same
-    /// path even if `cachesDirectory` availability changes between calls.
-    ///
-    /// Do NOT call `fixedZipURL` at multiple points in the same logical
-    /// operation — the two calls are not guaranteed to return the same base
-    /// directory if the caches directory flips between available and unavailable.
+    /// Any call site that needs this URL must use `withZipURL { url in ... }`
+    /// rather than accessing `fixedZipURL` directly. The scoped accessor
+    /// structurally enforces the single-snapshot rule: the URL is evaluated
+    /// exactly once and provided to the closure, preventing any divergence
+    /// between an existence check and a subsequent write targeting different
+    /// base directories if `cachesDirectory` availability changes mid-operation.
     var fixedZipURL: URL {
         // Re-evaluated on every access by design — see doc comment above.
         let caches: URL
@@ -127,6 +123,22 @@ public final class AppUpdater {
         return caches
             .appendingPathComponent(schedulerIdentifier, isDirectory: true)
             .appendingPathComponent("update.zip")
+    }
+
+    /// Evaluates `fixedZipURL` exactly once and passes the result to `body`.
+    ///
+    /// Use this at every call site that needs the zip URL — never call
+    /// `fixedZipURL` directly. The closure scope makes it structurally
+    /// impossible to evaluate the property twice in one logical operation,
+    /// which eliminates the class of bug where a `cachesDirectory` flip
+    /// between two accesses sends an existence check and a write to different
+    /// base directories.
+    ///
+    /// - Parameter body: A closure that receives the snapshotted `URL`.
+    /// - Returns: Whatever `body` returns.
+    @discardableResult
+    func withZipURL<T>(_ body: (URL) -> T) -> T {
+        body(fixedZipURL)
     }
 
     // MARK: - Background check interval
