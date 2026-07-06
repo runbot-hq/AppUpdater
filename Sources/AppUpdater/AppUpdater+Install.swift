@@ -114,6 +114,15 @@ extension AppUpdater {
             withZipURL { zipURL in
                 try? FileManager.default.removeItem(at: zipURL)
             }
+            // .idle, not .failed — nothing was attempted. The zip was never
+            // unzipped and the running bundle was never touched, so there is
+            // nothing to signal as broken. .failed means "an install attempt
+            // broke something recoverable"; that is not what happened here.
+            // .idle lets the next scheduler cycle re-download the real current
+            // release and surface it as .available. The warning log above is
+            // the observable triage signal for anyone debugging the transition;
+            // the host UI re-converging to idle is intentional, not silent.
+            // REVIEWER: do NOT change this to .failed(version:).
             state.apply(.idle)
             return
         }
