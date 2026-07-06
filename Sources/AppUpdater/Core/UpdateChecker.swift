@@ -152,18 +152,18 @@ public enum UpdateChecker {
         guard !currentVersion.isEmpty else {
             return .failed(UpdateCheckError.missingVersionKey)
         }
-        // After the .failed early-return above, fetchResult is guaranteed to be
-        // .fetched(_). The guard below is structurally unreachable on its else
-        // branch — it exists only to bind `release` from the associated value.
-        guard case .fetched(let release) = fetchResult else {
-            // structurally unreachable
-            return .upToDate
+        if case .fetched(let release) = fetchResult {
+            guard let release else { return .upToDate }
+            guard isNewer(release.tagName, than: currentVersion) else { return .upToDate }
+            return .updateAvailable(release: release)
         }
-        guard let release else { return .upToDate }
-        guard isNewer(release.tagName, than: currentVersion) else {
-            return .upToDate
-        }
-        return .updateAvailable(release: release)
+        // Safe exhaustion net: unreachable today (ReleaseFetchResult has two cases
+        // and .failed is handled above), but returns the correct sentinel if the
+        // enum gains a third case (.rateLimited, .offline, etc.) without a
+        // corresponding update here. .upToDate would be the wrong fallback — it
+        // is a positive result, not a failure. .noReleasesFound is consistent with
+        // how the explicit .failed case above is handled.
+        return .failed(UpdateCheckError.noReleasesFound)
     }
 
     /// Checks for an available update for `repo`.
