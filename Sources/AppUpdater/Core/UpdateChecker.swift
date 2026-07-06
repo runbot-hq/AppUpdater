@@ -177,9 +177,26 @@ public enum UpdateChecker {
     /// or `nil` if the fetch failed or no release matched the channel.
     ///
     /// This is the lower-level fetch primitive used by `GitHubReleaseProvider`.
-    /// Unlike `checkForUpdate`, it does not perform a semver comparison against
+    /// Unlike `checkForUpdate`, it does **not** perform a semver comparison against
     /// `currentVersion` — it simply returns the latest eligible release from the
     /// API, or `nil` on any failure (network, HTTP, decode, or no channel match).
+    ///
+    /// ## ❌ DO NOT replace this with a call to `checkForUpdate`
+    ///
+    /// This looks like duplication — both this method and `checkForUpdate` call
+    /// `fetchAndDecodeReleases` and `latestMatchingRelease`. It is not duplication.
+    /// The two methods have different contracts:
+    ///
+    /// - `fetchLatestAvailableRelease` — fetch + filter only. No version comparison.
+    ///   Returns the latest eligible release unconditionally (subject to network/channel).
+    /// - `checkForUpdate` — fetch + filter + compare. Returns `.upToDate` when the
+    ///   latest release is not newer than `currentVersion`.
+    ///
+    /// If you collapse this into `checkForUpdate` using a sentinel `currentVersion`
+    /// (e.g. `"v0.0.0"` or `""`) you introduce a regression: any repo whose latest
+    /// release is tagged exactly `v0.0.0` will silently return `nil` because
+    /// `isNewer("v0.0.0", than: "v0.0.0")` is `false`. The sentinel is a trap.
+    /// This has already been attempted — see PR #20 and issue #13.
     ///
     /// Callers that need to distinguish "fetch failed" from "no channel match"
     /// should use `checkForUpdate` instead, which maps these to `.failed` and
