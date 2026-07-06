@@ -100,15 +100,16 @@ extension AppUpdater {
         // match for the new preference), which proceeds optimistically per the
         // table above. A mid-flight toggle cannot produce a spurious abort.
         //
-        // Channel-toggle abort edge case: if the user was on stable, toggled to
-        // beta mid-flight, and GitHub returns the beta latest whose tag differs
-        // from the cached stable zip, the abort fires, the zip is wiped, and
-        // state resets to .idle. This is the CORRECT behaviour — the cached zip
-        // is genuinely stale from the new channel's perspective. The warning log
-        // is the triage signal. .idle is the right terminal state here for the
-        // same reason as any other yank abort: nothing was attempted, and the
-        // next scheduler cycle will re-fetch the right release for the new
-        // channel. Do not add a separate phase for this case.
+        // Channel-toggle abort edge case: if the user toggles channels mid-flight
+        // AND GitHub returns a latest tag for the new channel that differs from
+        // the cached zip's tag, the abort fires and the zip is wiped. Both
+        // conditions must hold — a toggle alone does not trigger an abort if
+        // beta and stable resolve to the same tag. When it does fire, this is
+        // the CORRECT behaviour: the cached zip is genuinely stale from the new
+        // channel's perspective. The warning log is the triage signal. .idle is
+        // the right terminal state: nothing was attempted, and the next scheduler
+        // cycle will re-fetch the right release for the new channel. Do not add
+        // a separate phase for this case.
         let betaChannel = betaChannelProvider()
         let revalidation = await provider.fetchLatestRelease(
             repo: repo,
@@ -149,6 +150,12 @@ extension AppUpdater {
             // On removal failure we apply .failed so the host surfaces a
             // recoverable error state instead of silently recycling the
             // yanked zip. REVIEWER: do NOT revert this to try?.
+            //
+            // withZipURL takes a non-escaping synchronous closure — see its
+            // definition in AppUpdater.swift: `func withZipURL<T>(_ body: (URL) -> T) -> T`.
+            // The closure runs to completion and returns before withZipURL
+            // returns, so zipRemovalFailed is fully written before the if check
+            // below reads it. There is no race here. Do not add @escaping.
             var zipRemovalFailed = false
             withZipURL { zipURL in
                 do {
