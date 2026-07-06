@@ -67,41 +67,47 @@ extension AppUpdater {
             appUpdaterLogger.warning("skipCodeSignValidation is true — code-sign identity check is disabled; install proceeds on SHA-256 integrity alone")
         }
 
-        let zipURL = fixedZipURL
-        let bundleURL = URL(fileURLWithPath: Bundle.main.bundlePath)
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("appupdater-update-\(UUID().uuidString)", isDirectory: true)
+        // withZipURL snapshots fixedZipURL once for the entire install sequence.
+        // zipURL is used for unzip input, the install step, and the post-relaunch
+        // cleanup — all guaranteed to reference the same path. See issue #16.
+        withZipURL { zipURL in
+            let bundleURL = URL(fileURLWithPath: Bundle.main.bundlePath)
+            let tmpDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("appupdater-update-\(UUID().uuidString)", isDirectory: true)
 
-        guard let appInZip = await unzipAndLocateApp(zipURL: zipURL, into: tmpDir) else {
-            isInstalling = false
-            state.apply(.failed(version: version))
-            return
-        }
+            Task {
+                guard let appInZip = await unzipAndLocateApp(zipURL: zipURL, into: tmpDir) else {
+                    isInstalling = false
+                    state.apply(.failed(version: version))
+                    return
+                }
 
-        #if canImport(AppKit)
-        if !skipCodeSignValidation {
-            let runningIdentity = await Bundle.main.codeSigningIdentity()
-            let updateIdentity = await Bundle(path: appInZip.path)?.codeSigningIdentity()
-            guard let runningIdentity,
-                  let updateIdentity,
-                  runningIdentity == updateIdentity else {
-                appUpdaterLogger.error("code-sign identity mismatch — aborting install")
-                isInstalling = false
-                state.apply(.failed(version: version))
-                try? FileManager.default.removeItem(at: tmpDir)
-                return
+                #if canImport(AppKit)
+                if !skipCodeSignValidation {
+                    let runningIdentity = await Bundle.main.codeSigningIdentity()
+                    let updateIdentity = await Bundle(path: appInZip.path)?.codeSigningIdentity()
+                    guard let runningIdentity,
+                          let updateIdentity,
+                          runningIdentity == updateIdentity else {
+                        appUpdaterLogger.error("code-sign identity mismatch — aborting install")
+                        isInstalling = false
+                        state.apply(.failed(version: version))
+                        try? FileManager.default.removeItem(at: tmpDir)
+                        return
+                    }
+                }
+                #endif
+
+                await replaceAndRelaunch(
+                    appInZip: appInZip,
+                    bundleURL: bundleURL,
+                    zipURL: zipURL,
+                    version: version,
+                    tmpDir: tmpDir,
+                    state: state
+                )
             }
         }
-        #endif
-
-        await replaceAndRelaunch(
-            appInZip: appInZip,
-            bundleURL: bundleURL,
-            zipURL: zipURL,
-            version: version,
-            tmpDir: tmpDir,
-            state: state
-        )
     }
 
     // MARK: - Private helpers

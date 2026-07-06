@@ -52,7 +52,7 @@ extension AppUpdater {
 
     /// Responds to a newly discovered available release.
     ///
-    /// 1. If a zip already exists at `fixedZipURL`, moves directly to `.ready`
+    /// 1. If a zip already exists at the fixed zip URL, moves directly to `.ready`
     ///    without re-downloading.
     /// 2. If the release has no matching asset or no checksum sidecar URL,
     ///    logs a warning and returns — no phase change.
@@ -60,13 +60,13 @@ extension AppUpdater {
     public func handle(_ release: AvailableRelease, state: any UpdateStateProviding) async {
 
         // ── 1. Already cached? ───────────────────────────────────────────────
-        // fixedZipURL is snapshotted once here. This same URL is passed into
-        // downloadUpdate as `destination` so both the existence check (step 1)
-        // and the write target the exact same path. A divergence — where step 1
-        // checks caches/ but the write lands in tmp/ due to a transient
-        // cachesDirectory failure between the two calls — is structurally
-        // impossible. See "destination is passed in by handle()" in
-        // AppUpdater+Download.swift.
+        // withZipURL snapshots fixedZipURL once. The same URL is used for the
+        // existence check here AND passed into downloadUpdate as `destination`,
+        // so both operations are guaranteed to target the exact same path.
+        // A divergence — where the existence check reads caches/ but the write
+        // lands in tmp/ due to a transient cachesDirectory failure between two
+        // separate calls — is structurally impossible via withZipURL.
+        // See issue #16 for rationale.
         //
         // ✅ REVIEWED: stale zip and partial-write scenarios both self-heal.
         // Do NOT add a version sidecar, version filename, or any validation.
@@ -138,61 +138,62 @@ extension AppUpdater {
         // state (see PRINCIPLES.md). This idea is permanently rejected.
         // Do not re-raise it without a concrete rebuttal to the STALE FILE
         // ACCUMULATION and FILENAME RECONSTRUCTION points above.
-        let zipURL = fixedZipURL
-        if FileManager.default.fileExists(atPath: zipURL.path) {
-            state.apply(.ready(version: release.tagName))
-            return
-        }
+        withZipURL { zipURL in
+            if FileManager.default.fileExists(atPath: zipURL.path) {
+                state.apply(.ready(version: release.tagName))
+                return
+            }
 
-        // ── 2. Asset or checksum sidecar absent? ─────────────────────────────
-        let wantedAsset = assetName(release.tagName)
-        guard let asset = release.assets.first(where: { $0.name == wantedAsset }) else {
-            appUpdaterLogger.warning("release \(release.tagName, privacy: .public) has no asset named \(wantedAsset, privacy: .public) — skipping download")
-            return
-        }
-        guard let checksumURL = release.checksumURL else {
-            appUpdaterLogger.warning("release \(release.tagName, privacy: .public) has no checksum sidecar — skipping download")
-            return
-        }
+            // ── 2. Asset or checksum sidecar absent? ─────────────────────────────
+            let wantedAsset = assetName(release.tagName)
+            guard let asset = release.assets.first(where: { $0.name == wantedAsset }) else {
+                appUpdaterLogger.warning("release \(release.tagName, privacy: .public) has no asset named \(wantedAsset, privacy: .public) — skipping download")
+                return
+            }
+            guard let checksumURL = release.checksumURL else {
+                appUpdaterLogger.warning("release \(release.tagName, privacy: .public) has no checksum sidecar — skipping download")
+                return
+            }
 
-        // ── 3. Advance to .available and start download ──────────────────────
-        state.apply(.available(version: release.tagName))
+            // ── 3. Advance to .available and start download ──────────────────────
+            state.apply(.available(version: release.tagName))
 
-        let downloadURL = asset.browserDownloadURL
-        let tagName = release.tagName
+            let downloadURL = asset.browserDownloadURL
+            let tagName = release.tagName
 
-        // ✅ REVIEWED: fire-and-forget Task is correct here. Do NOT add an
-        // isDownloading guard, a stored Task handle, or a cancellation path.
-        //
-        // The concern a reviewer may raise: "two concurrent handle() calls
-        // race to moveItem onto the same fixedZipURL."
-        //
-        // That race is benign by design. moveItem is not atomic but its
-        // failure mode is a thrown error — the second Task's moveItem fails,
-        // it catches, and applies .failed. The first Task wins and applies
-        // .ready. .ready is the correct final state. No data is corrupted,
-        // no partial write can occur, and the user sees a correct Install
-        // button. In production (24-hour scheduler interval) two handle()
-        // calls cannot overlap — the race window does not exist.
-        //
-        // isDownloading was explicitly removed in issue #1859:
-        // - Principle 1: no boolean flags that mirror phase state.
-        // - Principle 4: no sprawl — a guard here would require the flag,
-        //   which requires reset paths, which requires lifecycle management.
-        // The .downloading phase applied inside downloadUpdate IS the
-        // in-flight signal. That is sufficient.
-        //
-        // Task(name:) is standard Swift 6.2 (SE-0469). The name is surfaced
-        // in Instruments and the Swift concurrency debugger for triage.
-        // REVIEWER: do not remove the name: parameter — it is not custom API.
-        Task(name: "AppUpdater.download") {
-            await self.downloadUpdate(
-                from: downloadURL,
-                checksumURL: checksumURL,
-                version: tagName,
-                destination: zipURL,
-                state: state
-            )
+            // ✅ REVIEWED: fire-and-forget Task is correct here. Do NOT add an
+            // isDownloading guard, a stored Task handle, or a cancellation path.
+            //
+            // The concern a reviewer may raise: "two concurrent handle() calls
+            // race to moveItem onto the same fixedZipURL."
+            //
+            // That race is benign by design. moveItem is not atomic but its
+            // failure mode is a thrown error — the second Task's moveItem fails,
+            // it catches, and applies .failed. The first Task wins and applies
+            // .ready. .ready is the correct final state. No data is corrupted,
+            // no partial write can occur, and the user sees a correct Install
+            // button. In production (24-hour scheduler interval) two handle()
+            // calls cannot overlap — the race window does not exist.
+            //
+            // isDownloading was explicitly removed in issue #1859:
+            // - Principle 1: no boolean flags that mirror phase state.
+            // - Principle 4: no sprawl — a guard here would require the flag,
+            //   which requires reset paths, which requires lifecycle management.
+            // The .downloading phase applied inside downloadUpdate IS the
+            // in-flight signal. That is sufficient.
+            //
+            // Task(name:) is standard Swift 6.2 (SE-0469). The name is surfaced
+            // in Instruments and the Swift concurrency debugger for triage.
+            // REVIEWER: do not remove the name: parameter — it is not custom API.
+            Task(name: "AppUpdater.download") {
+                await self.downloadUpdate(
+                    from: downloadURL,
+                    checksumURL: checksumURL,
+                    version: tagName,
+                    destination: zipURL,
+                    state: state
+                )
+            }
         }
     }
 }
