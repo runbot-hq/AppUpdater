@@ -207,7 +207,7 @@ public enum UpdateChecker {
         repo: String,
         currentVersion: String,
         betaChannel: Bool,
-        assetName: (String) -> String
+        assetName: @Sendable (String) -> String
     ) async -> UpdateCheckResult {
         let provider = GitHubReleaseProvider()
         // GitHubReleaseProvider.fetchLatestRelease returns nil for both fetch
