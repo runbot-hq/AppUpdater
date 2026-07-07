@@ -84,8 +84,14 @@ struct AppUpdaterDownloadTests {
     // MARK: - Multiple assets → correct one selected
 
     /// When a release contains multiple zips (e.g. arch-specific builds),
-    /// `assetName` must select the correct one. The matching asset advances
-    /// to `.available`; the non-matching one is ignored.
+    /// `assetName` must select the correct one and the phase must advance to
+    /// `.available`. Note: this test verifies that phase advancement occurs
+    /// when the named asset is present, but it cannot assert which
+    /// `browserDownloadURL` was handed to the downloader — `AppUpdater` does
+    /// not expose the chosen asset URL to test code. URL-selection correctness
+    /// is implicitly covered by the `noMatchingAsset_phaseStaysIdle` test
+    /// (wrong name → no transition) in combination with this test (right name
+    /// → transition fires).
     @Test func multipleAssets_correctAssetSelected_advancesToAvailable() async throws {
         let (updater, state) = makeUpdater(assetName: { _ in "App-arm64.zip" })
 

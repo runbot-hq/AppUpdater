@@ -4,6 +4,15 @@ import Foundation
 import Testing
 @testable import AppUpdater
 
+// MARK: - Counter
+
+/// Reference-type counter safe to capture in `@Sendable` closures.
+/// All access is driven from `@MainActor` test code; `@unchecked Sendable`
+/// suppresses the compiler warning without introducing real data races.
+private final class Counter: @unchecked Sendable {
+    var value = 0
+}
+
 // MARK: - AppUpdaterFetchTests
 
 /// Tests that verify `AppUpdater.checkAndHandle` drives host state correctly
@@ -30,6 +39,23 @@ struct AppUpdaterFetchTests {
             assetName: { _ in "App.zip" },
             schedulerIdentifier: domain,
             betaChannelProvider: { betaChannel },
+            releaseProvider: provider
+        )
+        return (updater, provider, state)
+    }
+
+    private func makeStackWithBetaProvider(
+        betaChannelProvider: @Sendable @escaping () -> Bool
+    ) -> (updater: AppUpdater, provider: MockReleaseProvider, state: MockUpdateState) {
+        let provider = MockReleaseProvider()
+        let state = MockUpdateState()
+        let domain = "AppUpdaterFetchTests.betaProvider.\(UUID().uuidString)"
+        let updater = AppUpdater(
+            repo: "owner/repo",
+            currentVersion: "1.0.0",
+            assetName: { _ in "App.zip" },
+            schedulerIdentifier: domain,
+            betaChannelProvider: betaChannelProvider,
             releaseProvider: provider
         )
         return (updater, provider, state)
@@ -114,5 +140,37 @@ struct AppUpdaterFetchTests {
         let count = await provider.fetchCallCount
         #expect(count == 1)
         _ = state
+    }
+
+    // MARK: - Step 9: betaChannelProvider closure call timing
+
+    /// Verifies the stored `betaChannelProvider` closure is invoked during
+    /// `checkAndHandle` — not captured once at init. The counter increments
+    /// inside the closure; if the closure were never called `counter.value`
+    /// would stay 0.
+    ///
+    /// Note: `checkForUpdate(betaChannel:)` takes `betaChannel` as a parameter
+    /// and does NOT call the stored closure — this test must use `checkAndHandle`.
+    @Test func checkAndHandle_betaChannelProvider_isCalled() async throws {
+        let counter = Counter()
+        let (updater, _, state) = makeStackWithBetaProvider {
+            counter.value += 1
+            return false
+        }
+        await updater.checkAndHandle(state: state)
+        #expect(counter.value == 1)
+    }
+
+    /// Verifies the closure is called fresh on each `checkAndHandle` invocation
+    /// rather than being resolved once and cached.
+    @Test func checkAndHandle_betaChannelProvider_calledOnEachInvocation() async throws {
+        let counter = Counter()
+        let (updater, _, state) = makeStackWithBetaProvider {
+            counter.value += 1
+            return false
+        }
+        await updater.checkAndHandle(state: state)
+        await updater.checkAndHandle(state: state)
+        #expect(counter.value == 2)
     }
 }
