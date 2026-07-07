@@ -93,7 +93,7 @@ extension Bundle {
         guard !bundlePath.isEmpty else { return nil }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        process.executableURL = URL(filePath: "/usr/bin/codesign")
         process.arguments = ["-dvvv", bundlePath]
         // codesign writes verbose output to stderr — stdout will be empty.
         process.standardOutput = FileHandle.nullDevice

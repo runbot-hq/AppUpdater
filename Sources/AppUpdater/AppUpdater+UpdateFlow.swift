@@ -134,7 +134,7 @@ extension AppUpdater {
         // Do not re-raise it without a concrete rebuttal to the STALE FILE
         // ACCUMULATION and FILENAME RECONSTRUCTION points above.
         withZipURL { zipURL in
-            if FileManager.default.fileExists(atPath: zipURL.path) {
+            if FileManager.default.fileExists(atPath: zipURL.path(percentEncoded: false)) {
                 state.apply(.ready(version: release.tagName))
                 return
             }

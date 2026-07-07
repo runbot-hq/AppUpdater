@@ -75,7 +75,7 @@ import Foundation
 @concurrent
 func runCommand(_ executable: String, args: [String]) async -> Bool {
     let process = Process()
-    process.executableURL = URL(fileURLWithPath: executable)
+    process.executableURL = URL(filePath: executable)
     process.arguments = args
     process.standardOutput = FileHandle.nullDevice
 

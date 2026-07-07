@@ -299,9 +299,9 @@ extension AppUpdater {
         // "closure body is synchronous" and "work is asynchronous" is intentional
         // and worth noting for anyone auditing concurrent behaviour here.
         withZipURL { zipURL in
-            let bundleURL = URL(fileURLWithPath: Bundle.main.bundlePath)
+            let bundleURL = URL(filePath: Bundle.main.bundlePath)
             let tmpDir = FileManager.default.temporaryDirectory
-                .appendingPathComponent("appupdater-update-\(UUID().uuidString)", isDirectory: true)
+                .appending(component: "appupdater-update-\(UUID().uuidString)", directoryHint: .isDirectory)
 
             // Task {} here is NOT detached — it inherits the @MainActor
             // isolation of the enclosing installAndRelaunch function. In Swift
@@ -357,7 +357,7 @@ extension AppUpdater {
                 #if canImport(AppKit)
                 if !skipCodeSignValidation {
                     let runningIdentity = await Bundle.main.codeSigningIdentity()
-                    let updateIdentity = await Bundle(path: appInZip.path)?.codeSigningIdentity()
+                    let updateIdentity = await Bundle(path: appInZip.path(percentEncoded: false))?.codeSigningIdentity()
                     guard let runningIdentity,
                           let updateIdentity,
                           runningIdentity == updateIdentity else {
@@ -415,7 +415,7 @@ extension AppUpdater {
         } catch {
             return nil
         }
-        guard await runCommand("/usr/bin/ditto", args: ["-xk", zipURL.path, tmpDir.path]) else {
+        guard await runCommand("/usr/bin/ditto", args: ["-xk", zipURL.path(percentEncoded: false), tmpDir.path(percentEncoded: false)]) else {
             try? fm.removeItem(at: tmpDir)
             return nil
         }
@@ -475,8 +475,8 @@ extension AppUpdater {
         // ── Step 3: relaunch ──────────────────────────────────────────────────
         #if canImport(AppKit)
         let relaunchTask = Process()
-        relaunchTask.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        relaunchTask.arguments = ["-n", finalURL.path]
+        relaunchTask.executableURL = URL(filePath: "/usr/bin/open")
+        relaunchTask.arguments = ["-n", finalURL.path(percentEncoded: false)]
         do {
             try relaunchTask.run()
         } catch {
