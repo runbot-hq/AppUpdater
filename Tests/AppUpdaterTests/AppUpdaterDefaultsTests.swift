@@ -47,28 +47,4 @@ import Testing
         )
         #expect(updater.checkInterval == 300)
     }
-
-    /// Passing the debug default (60 s) explicitly must be stored as-is.
-    @Test func checkInterval_debugDefault_60Seconds() {
-        let updater = AppUpdater(
-            repo: "owner/repo",
-            currentVersion: "1.0.0",
-            assetName: { _ in "App.zip" },
-            schedulerIdentifier: "com.test.debug-interval",
-            checkInterval: 60
-        )
-        #expect(updater.checkInterval == 60)
-    }
-
-    /// Passing the release default (24 h) explicitly must be stored as-is.
-    @Test func checkInterval_releaseDefault_24Hours() {
-        let updater = AppUpdater(
-            repo: "owner/repo",
-            currentVersion: "1.0.0",
-            assetName: { _ in "App.zip" },
-            schedulerIdentifier: "com.test.release-interval",
-            checkInterval: 24 * 60 * 60
-        )
-        #expect(updater.checkInterval == 24 * 60 * 60)
-    }
 }
