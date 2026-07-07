@@ -205,8 +205,10 @@ struct AppUpdaterDownloadTests {
     }
 
     /// Regression: a second `handle` call while a download is in flight
-    /// when the zip does not yet exist. Both calls must produce a `.available`
-    /// transition.
+    /// (zip not yet on disk). `handle` has no in-flight dedup guard by design
+    /// — each call is independent and must produce its own `.available`
+    /// transition. `== 2` is intentional; if someone adds a dedup guard this
+    /// test will fail and the decision should be made explicitly.
     @Test func secondHandle_noZip_advancesToAvailableAgain() async throws {
         let (updater, state) = makeUpdater()
 
