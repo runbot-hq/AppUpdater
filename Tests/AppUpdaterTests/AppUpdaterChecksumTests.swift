@@ -68,7 +68,10 @@ struct AppUpdaterChecksumTests {
         #expect(urlError.code == .cannotDecodeContentData)
     }
 
-    @Test func verifyChecksum_emptyExpectedHex_throwsOnAnyNonEmptyFile() async throws {
+    /// An empty `expectedHex` string can never match any real SHA-256 digest,
+    /// so `verifyChecksum` must throw `URLError.cannotDecodeContentData` —
+    /// the same error as any other mismatch.
+    @Test func verifyChecksum_emptyExpectedHex_throwsCannotDecodeContentData() async throws {
         let url = try writeTempFile(Data("any content".utf8))
         defer { try? FileManager.default.removeItem(at: url) }
         var thrown: Error?
@@ -77,7 +80,8 @@ struct AppUpdaterChecksumTests {
         } catch {
             thrown = error
         }
-        #expect(thrown != nil)
+        let urlError = try #require(thrown as? URLError)
+        #expect(urlError.code == .cannotDecodeContentData)
     }
 
     // MARK: - verifyChecksum — missing file
