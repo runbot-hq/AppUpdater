@@ -181,6 +181,6 @@ struct AppUpdaterDownloadTests {
             if case .available = $0 { return true }
             return false
         }.count
-        #expect(availableCount >= 1)
+        #expect(availableCount == 2)
     }
 }
