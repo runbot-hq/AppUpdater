@@ -63,6 +63,17 @@ extension AppUpdater {
         isInstalling = true
 
         // Extract version from the .ready phase; zip is always at fixedZipURL.
+        //
+        // version is captured here as a `let` constant on @MainActor, before
+        // the first suspension point (fetchLatestRelease below). It cannot be
+        // mutated by any other code while this function is suspended — `let`
+        // bindings are immutable and @MainActor ensures no concurrent actor
+        // can write to state.currentPhase between the guard and the await.
+        // version is therefore guaranteed to remain the correct cached tag
+        // throughout the rest of this function, including all post-await uses.
+        // Do NOT re-read state.currentPhase to refresh version after the await
+        // — the post-revalidation state re-check guard below handles phase
+        // staleness separately; version itself is always valid as captured.
         guard case .ready(let version) = state.currentPhase else {
             isInstalling = false
             state.apply(.failed(version: nil))
