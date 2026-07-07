@@ -199,6 +199,34 @@ extension AppUpdater {
         }
         // ────────────────────────────────────────────────────────────────────
 
+        // ── Post-revalidation state re-check ─────────────────────────────────
+        // fetchLatestRelease above is the first (and only) suspension point in
+        // this function. While suspended, another @MainActor task could have
+        // transitioned state.currentPhase away from .ready — for example, if a
+        // future cancel API is added that resets state to .idle while the user
+        // is waiting for the network call to return.
+        //
+        // Today no such cancel path exists (UpdateStateProviding has no cancel
+        // method, and the scheduler does not touch .ready). This guard is
+        // therefore a no-op in the current codebase. It is added defensively so
+        // that if a cancel API is ever introduced, the install does not proceed
+        // on stale authorisation. The cost is one phase read on the main actor —
+        // zero overhead.
+        //
+        // .idle: return without applying any phase — the host already moved away
+        // from .ready intentionally; applying .failed here would be wrong.
+        // .failed: same reasoning — do not overwrite with a second .failed.
+        // Any non-.ready phase: silently abort and reset isInstalling.
+        //
+        // Do NOT remove this guard on the grounds that no cancel path exists today.
+        // Its value is precisely that it costs nothing now and prevents a latent
+        // correctness hole later.
+        guard case .ready = state.currentPhase else {
+            isInstalling = false
+            return
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         // ⚠️ skipCodeSignValidation is true — code-sign identity check is disabled.
         // Install will proceed on SHA-256 integrity alone.
         //
