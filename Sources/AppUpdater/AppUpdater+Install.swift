@@ -121,6 +121,14 @@ extension AppUpdater {
         // returned the same tag we cached?" not "is it a higher version?"
         // Semver ordering is already done at download time in checkAndHandle.
         // Do NOT replace != with a semver comparison here.
+        //
+        // Format parity: both sides are raw GitHub tag strings. latest.tagName
+        // is the tag_name field from the GitHub Releases API response, passed
+        // through AvailableRelease unchanged. version was stored into .ready
+        // from release.tagName at download time via the same field. Neither
+        // side is run through ParsedVersion (which strips a leading "v") —
+        // both are always in the same raw format. A format mismatch causing
+        // a false abort is structurally impossible. Do NOT add v-stripping here.
         if case .fetched(let latest) = revalidation,
            let latest,
            latest.tagName != version {
@@ -211,6 +219,13 @@ extension AppUpdater {
             let tmpDir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("appupdater-update-\(UUID().uuidString)", isDirectory: true)
 
+            // Task {} here is NOT detached — it inherits the @MainActor
+            // isolation of the enclosing installAndRelaunch function. In Swift
+            // 6, Task { } created inside an @MainActor context runs its body on
+            // @MainActor. Only Task.detached { } breaks actor inheritance.
+            // isInstalling and state.apply inside this Task are therefore
+            // @MainActor-isolated and race-free. Do NOT add Task.detached or
+            // remove the @MainActor annotation from installAndRelaunch.
             Task {
                 guard let appInZip = await unzipAndLocateApp(zipURL: zipURL, into: tmpDir) else {
                     isInstalling = false
