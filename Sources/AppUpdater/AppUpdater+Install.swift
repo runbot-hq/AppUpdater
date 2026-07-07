@@ -256,6 +256,14 @@ extension AppUpdater {
         // withZipURL snapshots fixedZipURL once for the entire install sequence.
         // zipURL is used for unzip input, the install step, and the post-relaunch
         // cleanup — all guaranteed to reference the same path. See issue #16.
+        //
+        // isInstalling is NOT reset here before entering withZipURL. It is owned
+        // by the Task {} body below and released on every exit path inside that
+        // Task: on unzip failure, on code-sign abort, on replaceItemAt failure,
+        // on open -n failure, and implicitly on NSApp.terminate (process exits).
+        // Resetting it here — before the Task starts its heavy work — would
+        // allow a second installAndRelaunch call to enter while the first install
+        // is still in flight. Do NOT add isInstalling = false before this call.
         withZipURL { zipURL in
             let bundleURL = URL(fileURLWithPath: Bundle.main.bundlePath)
             let tmpDir = FileManager.default.temporaryDirectory
