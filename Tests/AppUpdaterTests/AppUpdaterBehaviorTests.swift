@@ -10,7 +10,7 @@ import Testing
 /// `MockReleaseProvider` — no network, no disk I/O.
 @MainActor
 @Suite("AppUpdater.checkForUpdate")
-struct AppUpdaterCheckAndHandleTests {
+struct AppUpdaterCheckForUpdateTests {
 
     private let newerTag = "v2.0.0"
     private let olderTag = "v0.9.0"
