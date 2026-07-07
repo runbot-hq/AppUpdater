@@ -100,6 +100,15 @@ public struct GitHubReleaseProvider: ReleaseProvider {
         }
         let checksumAssetName = assetName(latest.tagName) + ".sha256"
         let checksumAsset = latest.assets.first(where: { $0.name == checksumAssetName })
+        // tagName is passed through verbatim from Release.tagName with no
+        // normalisation (no v-stripping, no lowercasing, no trimming).
+        // AvailableRelease has no init logic that transforms it — it is a
+        // plain memberwise assignment. This is the format-parity invariant
+        // that installAndRelaunch's string-equality revalidation check depends
+        // on: both sides of the != comparison are raw GitHub tag strings from
+        // the same field, via the same path. Do NOT add normalisation here or
+        // in AvailableRelease.init without updating the revalidation check and
+        // the decode tests accordingly.
         return .fetched(AvailableRelease(
             tagName: latest.tagName,
             assets: latest.assets,
