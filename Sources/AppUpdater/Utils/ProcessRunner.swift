@@ -1,5 +1,6 @@
 // ProcessRunner.swift
 // AppUpdater
+
 import Foundation
 
 // MARK: - Process helper
@@ -75,12 +76,11 @@ import Foundation
 @concurrent
 func runCommand(_ executable: String, args: [String]) async -> Bool {
     let process = Process()
-    process.executableURL = URL(fileURLWithPath: executable)
+    // Use URL(filePath:) — URL(fileURLWithPath:) is deprecated in macOS 13+.
+    process.executableURL = URL(filePath: executable)
     process.arguments = args
     process.standardOutput = FileHandle.nullDevice
 
-    // Pipe stderr so failures are diagnosable. stdout is still discarded —
-    // ditto produces no useful stdout on success.
     let stderrPipe = Pipe()
     process.standardError = stderrPipe
 
