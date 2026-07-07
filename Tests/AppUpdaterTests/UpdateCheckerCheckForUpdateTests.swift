@@ -13,6 +13,7 @@ import Testing
 /// These tests stay synchronous and never touch the network: all input is
 /// derived from the JSON fixtures loaded via `Bundle.module`. Zero
 /// `DispatchQueue` usage (Pillar 5).
+@Suite("UpdateChecker.evaluate")
 struct UpdateCheckerCheckForUpdateTests {
 
     // MARK: - Fixture helpers
@@ -54,8 +55,6 @@ struct UpdateCheckerCheckForUpdateTests {
 
     // MARK: - missingVersionKey
 
-    /// Verifies that `evaluate` returns `.missingVersionKey` when
-    /// `currentVersion` is empty and the fetch succeeded (no failure).
     @Test func emptyCurrentVersion_returnsMissingVersionKey() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(nil),
@@ -69,8 +68,6 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// Verifies that `evaluate` returns `.missingVersionKey` when
-    /// `currentVersion` is empty and a non-nil release was fetched.
     @Test func fetchedNonNilRelease_emptyVersion_returnsMissingVersionKey() throws {
         let release = try #require(try firstRelease(fromFixture: "releases.newer"))
         let result = UpdateChecker.evaluate(
@@ -85,7 +82,6 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// Verifies that `.failed` takes priority over `currentVersion.isEmpty`.
     @Test func failedFetchResult_emptyVersion_returnsNoReleasesFound() {
         let result = UpdateChecker.evaluate(
             fetchResult: .failed,
@@ -103,10 +99,6 @@ struct UpdateCheckerCheckForUpdateTests {
 
     /// A garbage `currentVersion` string with a nil-fetched release must not
     /// crash — `evaluate` must return `.upToDate` (no release to offer).
-    ///
-    /// Note: `missingVersionKey` only fires on an empty string; a non-empty
-    /// but unparseable version is treated as a valid (zero-comparable) string
-    /// by `isNewer`, so `.upToDate` is the expected result here.
     @Test func malformedCurrentVersion_fetchedNil_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(nil),
@@ -119,8 +111,6 @@ struct UpdateCheckerCheckForUpdateTests {
     }
 
     /// A garbage `currentVersion` string with a real release must not crash.
-    /// Because `isNewer` cannot parse "not-a-version" as greater than any
-    /// real tag, the result must be `.upToDate` — not a crash or `.updateAvailable`.
     @Test func malformedCurrentVersion_withRelease_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "v2.0.0")),
@@ -133,8 +123,6 @@ struct UpdateCheckerCheckForUpdateTests {
     }
 
     /// A garbage release `tagName` with a valid `currentVersion` must not crash.
-    /// `isNewer("not-a-version", than: "1.0.0")` must return `false`, so
-    /// `evaluate` must return `.upToDate`.
     @Test func malformedReleaseTag_validCurrentVersion_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "not-a-version")),
@@ -182,7 +170,7 @@ struct UpdateCheckerCheckForUpdateTests {
         #expect(UpdateChecker.isNewer(release.tagName, than: "1.0.0"))
     }
 
-    // MARK: - Semver guard: fixture-tag compared to same version is not newer
+    // MARK: - Semver guard
 
     @Test func fixtureNewer_v200_notNewerThanItself() throws {
         let release = try #require(try firstRelease(fromFixture: "releases.newer"))
@@ -192,8 +180,7 @@ struct UpdateCheckerCheckForUpdateTests {
 
 // MARK: - FixtureRelease
 
-/// A minimal Decodable mirror of the JSON fixture shape. Decodes only the
-/// fields needed by these tests; extra fields are ignored.
+/// A minimal Decodable mirror of the JSON fixture shape.
 private struct FixtureRelease: Decodable {
     let tagName: String
     let prerelease: Bool

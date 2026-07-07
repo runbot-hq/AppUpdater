@@ -12,6 +12,7 @@ import Testing
 ///
 /// Both verifyChecksum and fixedZipURL require no network.
 @MainActor
+@Suite("AppUpdater.checksum")
 struct AppUpdaterChecksumTests {
 
     // MARK: - Helpers
@@ -93,13 +94,11 @@ struct AppUpdaterChecksumTests {
     @Test func verifyChecksum_zeroByteFile_matchingEmptyDigest_doesNotThrow() async throws {
         let url = try writeTempFile(Data())
         defer { try? FileManager.default.removeItem(at: url) }
-        // Must not throw — the file exists and its digest matches.
         try await verifyChecksum(zipURL: url, expectedHex: emptyDataSHA256)
     }
 
     /// When the expected hex does NOT match the zero-byte file’s digest,
-    /// `verifyChecksum` must throw `URLError.cannotDecodeContentData` —
-    /// the same error as any other mismatch.
+    /// `verifyChecksum` must throw `URLError.cannotDecodeContentData`.
     @Test func verifyChecksum_zeroByteFile_wrongDigest_throwsCannotDecodeContentData() async throws {
         let url = try writeTempFile(Data())
         defer { try? FileManager.default.removeItem(at: url) }

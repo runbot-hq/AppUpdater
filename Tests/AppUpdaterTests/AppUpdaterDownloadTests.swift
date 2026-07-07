@@ -21,6 +21,7 @@ import Testing
 /// All tests are `@MainActor` because `AppUpdater` and `MockUpdateState`
 /// are both `@MainActor`.
 @MainActor
+@Suite("AppUpdater.handle")
 struct AppUpdaterDownloadTests {
 
     // MARK: - Helpers
@@ -72,8 +73,6 @@ struct AppUpdaterDownloadTests {
 
     /// When the asset matches but `checksumURL` is nil, `handle` logs a warning
     /// and returns without applying any phase transition.
-    /// Asserts both `currentPhase == .idle` and `appliedPhases.isEmpty` to guard
-    /// against any spurious intermediate phase writes.
     @Test func nilChecksumURL_noPhaseTransitions() async throws {
         let (updater, state) = makeUpdater()
         await updater.handle(try releaseWithNilChecksum(), state: state)
@@ -88,7 +87,6 @@ struct AppUpdaterDownloadTests {
     /// `assetName` must select the correct one. The matching asset advances
     /// to `.available`; the non-matching one is ignored.
     @Test func multipleAssets_correctAssetSelected_advancesToAvailable() async throws {
-        // Updater is configured to pick the arm64 variant.
         let (updater, state) = makeUpdater(assetName: { _ in "App-arm64.zip" })
 
         let zipURL = updater.fixedZipURL
@@ -180,8 +178,7 @@ struct AppUpdaterDownloadTests {
 
     /// When the asset matches and a checksum URL is provided, `handle` must
     /// synchronously advance to `.available` before handing off to the download
-    /// Task. We verify only the synchronous phase here; the async download path
-    /// requires a real network and is out of scope for unit tests.
+    /// Task. We verify only the synchronous phase here.
     @Test func assetAndChecksum_advancesToAvailable() async throws {
         let (updater, state) = makeUpdater()
 

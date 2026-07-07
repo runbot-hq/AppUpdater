@@ -12,6 +12,7 @@ import Testing
 /// Zero `DispatchQueue` usage (Pillar 5). All tests run on `@MainActor`
 /// because `AppUpdater` and `MockUpdateState` are both `@MainActor`.
 @MainActor
+@Suite("AppUpdater.checkAndHandle")
 struct AppUpdaterFetchTests {
 
     // MARK: - Helpers
@@ -36,10 +37,6 @@ struct AppUpdaterFetchTests {
 
     /// Builds an `AvailableRelease` with a matching `App.zip` asset **and** a
     /// real `checksumURL` (pointing at a `.sha256` sidecar).
-    ///
-    /// `handle()` guards on `release.checksumURL != nil` before applying any
-    /// phase — a nil checksum causes an early return with no state transition,
-    /// which would silently break every test that expects `.available`.
     private func makeRelease(
         tagName: String = "v2.0.0"
     ) throws -> AvailableRelease {
@@ -65,7 +62,7 @@ struct AppUpdaterFetchTests {
         let (updater, provider, state) = makeStack()
         await provider.set(releaseToReturn: try makeRelease())
         await updater.checkAndHandle(state: state)
-        // At minimum the .available phase must have been applied.
+
         let hasAvailable = state.appliedPhases.contains {
             if case .available = $0 { return true }
             return false
@@ -74,7 +71,6 @@ struct AppUpdaterFetchTests {
     }
 
     @Test func checkAndHandle_upToDate_noPhaseTransition() async throws {
-        // Provider returns the same version as currentVersion → .upToDate
         let (updater, provider, state) = makeStack(currentVersion: "2.0.0")
         await provider.set(releaseToReturn: try makeRelease(tagName: "v2.0.0"))
         await updater.checkAndHandle(state: state)
@@ -83,7 +79,6 @@ struct AppUpdaterFetchTests {
 
     @Test func checkAndHandle_nilRelease_noPhaseTransition() async throws {
         let (updater, _, state) = makeStack()
-        // Default releaseToReturn is nil — no phase transitions expected.
         await updater.checkAndHandle(state: state)
         #expect(state.appliedPhases.isEmpty)
     }
