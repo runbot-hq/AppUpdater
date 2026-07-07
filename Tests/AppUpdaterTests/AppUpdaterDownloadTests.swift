@@ -26,13 +26,14 @@ struct AppUpdaterDownloadTests {
     // MARK: - Helpers
 
     private func makeUpdater(
-        currentVersion: String = "1.0.0"
+        currentVersion: String = "1.0.0",
+        assetName: @escaping (AvailableRelease) -> String = { _ in "App.zip" }
     ) -> (updater: AppUpdater, state: MockUpdateState) {
         let domain = "AppUpdaterDownloadTests.\(UUID().uuidString)"
         let updater = AppUpdater(
             repo: "owner/repo",
             currentVersion: currentVersion,
-            assetName: { _ in "App.zip" },
+            assetName: assetName,
             schedulerIdentifier: domain,
             betaChannelProvider: { false }
         )
@@ -51,7 +52,7 @@ struct AppUpdaterDownloadTests {
 
     // MARK: - No matching asset → phase stays .idle
 
-    /// A release whose assets list has no file matching the expected name must
+    /// A release whose assets list contains no file matching `assetName` must
     /// leave the phase at `.idle` — no phase transitions fire.
     @Test func noMatchingAsset_phaseStaysIdle() async throws {
         let (updater, state) = makeUpdater()
@@ -76,6 +77,67 @@ struct AppUpdaterDownloadTests {
     @Test func nilChecksumURL_noPhaseTransitions() async throws {
         let (updater, state) = makeUpdater()
         await updater.handle(try releaseWithNilChecksum(), state: state)
+
+        #expect(state.currentPhase == .idle)
+        #expect(state.appliedPhases.isEmpty)
+    }
+
+    // MARK: - Multiple assets → correct one selected
+
+    /// When a release contains multiple zips (e.g. arch-specific builds),
+    /// `assetName` must select the correct one. The matching asset advances
+    /// to `.available`; the non-matching one is ignored.
+    @Test func multipleAssets_correctAssetSelected_advancesToAvailable() async throws {
+        // Updater is configured to pick the arm64 variant.
+        let (updater, state) = makeUpdater(assetName: { _ in "App-arm64.zip" })
+
+        let zipURL = updater.fixedZipURL
+        try? FileManager.default.removeItem(at: zipURL)
+
+        let arm64Asset = ReleaseAsset(
+            name: "App-arm64.zip",
+            browserDownloadURL: try #require(URL(string: "https://example.com/App-arm64.zip"))
+        )
+        let x86Asset = ReleaseAsset(
+            name: "App-x86_64.zip",
+            browserDownloadURL: try #require(URL(string: "https://example.com/App-x86_64.zip"))
+        )
+        let release = AvailableRelease(
+            tagName: "v2.0.0",
+            assets: [x86Asset, arm64Asset], // arm64 is second — order must not matter
+            checksumURL: URL(string: "https://example.com/App-arm64.zip.sha256")
+        )
+        await updater.handle(release, state: state)
+
+        guard let first = state.appliedPhases.first,
+              case .available(let version) = first else {
+            Issue.record("Expected .available, got \(state.appliedPhases)")
+            return
+        }
+        #expect(version == "v2.0.0")
+    }
+
+    /// When a release has multiple assets but none match `assetName`,
+    /// the phase must stay `.idle` regardless of how many assets are present.
+    @Test func multipleAssets_noneMatch_phaseStaysIdle() async throws {
+        let (updater, state) = makeUpdater(assetName: { _ in "App-arm64.zip" })
+
+        let assets = try [
+            ReleaseAsset(
+                name: "App-x86_64.zip",
+                browserDownloadURL: try #require(URL(string: "https://example.com/App-x86_64.zip"))
+            ),
+            ReleaseAsset(
+                name: "App-universal.zip",
+                browserDownloadURL: try #require(URL(string: "https://example.com/App-universal.zip"))
+            )
+        ]
+        let release = AvailableRelease(
+            tagName: "v2.0.0",
+            assets: assets,
+            checksumURL: URL(string: "https://example.com/App.sha256")
+        )
+        await updater.handle(release, state: state)
 
         #expect(state.currentPhase == .idle)
         #expect(state.appliedPhases.isEmpty)
@@ -123,7 +185,6 @@ struct AppUpdaterDownloadTests {
     @Test func assetAndChecksum_advancesToAvailable() async throws {
         let (updater, state) = makeUpdater()
 
-        // Ensure the zip does NOT exist so we don’t hit the cached fast-path.
         let zipURL = updater.fixedZipURL
         try? FileManager.default.removeItem(at: zipURL)
 
@@ -138,7 +199,6 @@ struct AppUpdaterDownloadTests {
         )
         await updater.handle(release, state: state)
 
-        // The first synchronous phase must be .available.
         guard let first = state.appliedPhases.first,
               case .available(let version) = first else {
             Issue.record("Expected first applied phase to be .available, got \(state.appliedPhases)")
@@ -147,10 +207,9 @@ struct AppUpdaterDownloadTests {
         #expect(version == "v2.0.0")
     }
 
-    /// Regression: a second `handle` call while a download is in flight arrives
-    /// when the zip does not yet exist. `handle` re-advances to `.available`
-    /// (the in-flight guard was removed with `isDownloading`). Both calls must
-    /// produce a `.available` transition.
+    /// Regression: a second `handle` call while a download is in flight
+    /// when the zip does not yet exist. Both calls must produce a `.available`
+    /// transition.
     @Test func secondHandle_noZip_advancesToAvailableAgain() async throws {
         let (updater, state) = makeUpdater()
 
