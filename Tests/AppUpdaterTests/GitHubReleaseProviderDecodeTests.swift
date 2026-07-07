@@ -84,13 +84,18 @@ struct GitHubReleaseProviderDecodeTests {
         #expect(beta.prerelease == true)
     }
 
-    /// Decoding fails gracefully when `tag_name` is absent — `Release` is not
-    /// constructed with a default empty string.
-    @Test func decode_missingTagName_throws() {
+    /// Decoding fails when `tag_name` is absent — `Release` is not constructed
+    /// with a default empty string.
+    ///
+    /// `#require(throws:)` is used instead of `#expect(throws:)` so that a
+    /// future default value added to `tagName` causes an immediate hard failure
+    /// rather than a non-fatal expectation miss. This is a regression guard;
+    /// it must halt if the invariant is broken.
+    @Test func decode_missingTagName_throws() throws {
         let json = Data("""
         [{ "prerelease": false, "assets": [] }]
         """.utf8)
-        #expect(throws: (any Error).self) {
+        try #require(throws: (any Error).self) {
             try JSONDecoder().decode([GitHubReleaseProvider.Release].self, from: json)
         }
     }
