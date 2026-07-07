@@ -4,12 +4,12 @@ import Foundation
 import Testing
 @testable import AppUpdater
 
-// MARK: - AppUpdaterCheckAndHandleTests
+// MARK: - AppUpdaterCheckForUpdateTests
 
 /// Exercises `AppUpdater.checkForUpdate(betaChannel:)` in isolation using
 /// `MockReleaseProvider` — no network, no disk I/O.
 @MainActor
-@Suite("AppUpdater.checkAndHandle")
+@Suite("AppUpdater.checkForUpdate")
 struct AppUpdaterCheckAndHandleTests {
 
     private let newerTag = "v2.0.0"
