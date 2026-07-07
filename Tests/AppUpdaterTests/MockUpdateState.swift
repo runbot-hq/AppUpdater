@@ -23,10 +23,4 @@ final class MockUpdateState: UpdateStateProviding {
         currentPhase = phase
         appliedPhases.append(phase)
     }
-
-    /// Resets the mock to its initial state between tests.
-    func reset() {
-        currentPhase = .idle
-        appliedPhases = []
-    }
 }

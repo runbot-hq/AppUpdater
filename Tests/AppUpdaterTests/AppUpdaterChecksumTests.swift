@@ -12,6 +12,7 @@ import Testing
 ///
 /// Both verifyChecksum and fixedZipURL require no network.
 @MainActor
+@Suite("AppUpdater.checksum")
 struct AppUpdaterChecksumTests {
 
     // MARK: - Helpers
@@ -40,6 +41,9 @@ struct AppUpdaterChecksumTests {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// SHA-256 of zero bytes — a well-known constant used in the zero-byte tests.
+    private let emptyDataSHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
     // MARK: - verifyChecksum — matching digest
 
     @Test func verifyChecksum_matchingDigest_doesNotThrow() async throws {
@@ -47,7 +51,6 @@ struct AppUpdaterChecksumTests {
         let url = try writeTempFile(payload)
         defer { try? FileManager.default.removeItem(at: url) }
         let expectedHex = sha256Hex(payload)
-        // Must not throw
         try await verifyChecksum(zipURL: url, expectedHex: expectedHex)
     }
 
@@ -68,7 +71,9 @@ struct AppUpdaterChecksumTests {
         #expect(urlError.code == .cannotDecodeContentData)
     }
 
-    @Test func verifyChecksum_emptyExpectedHex_throwsOnAnyNonEmptyFile() async throws {
+    /// An empty `expectedHex` string can never match any real SHA-256 digest,
+    /// so `verifyChecksum` must throw `URLError.cannotDecodeContentData`.
+    @Test func verifyChecksum_emptyExpectedHex_throwsCannotDecodeContentData() async throws {
         let url = try writeTempFile(Data("any content".utf8))
         defer { try? FileManager.default.removeItem(at: url) }
         var thrown: Error?
@@ -77,7 +82,35 @@ struct AppUpdaterChecksumTests {
         } catch {
             thrown = error
         }
-        #expect(thrown != nil)
+        let urlError = try #require(thrown as? URLError)
+        #expect(urlError.code == .cannotDecodeContentData)
+    }
+
+    // MARK: - verifyChecksum — zero-byte file
+
+    /// A zero-byte file is distinct from a missing file: it opens successfully
+    /// and produces a real SHA-256 (the empty-data digest). When the expected
+    /// hex matches that digest, `verifyChecksum` must not throw.
+    @Test func verifyChecksum_zeroByteFile_matchingEmptyDigest_doesNotThrow() async throws {
+        let url = try writeTempFile(Data())
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await verifyChecksum(zipURL: url, expectedHex: emptyDataSHA256)
+    }
+
+    /// When the expected hex does NOT match the zero-byte file’s digest,
+    /// `verifyChecksum` must throw `URLError.cannotDecodeContentData`.
+    @Test func verifyChecksum_zeroByteFile_wrongDigest_throwsCannotDecodeContentData() async throws {
+        let url = try writeTempFile(Data())
+        defer { try? FileManager.default.removeItem(at: url) }
+        let wrongHex = sha256Hex(Data("not empty".utf8))
+        var thrown: Error?
+        do {
+            try await verifyChecksum(zipURL: url, expectedHex: wrongHex)
+        } catch {
+            thrown = error
+        }
+        let urlError = try #require(thrown as? URLError)
+        #expect(urlError.code == .cannotDecodeContentData)
     }
 
     // MARK: - verifyChecksum — missing file
@@ -96,13 +129,11 @@ struct AppUpdaterChecksumTests {
 
     // MARK: - fixedZipURL
 
-    @Test func fixedZipURL_filenameIsUpdateZip() {
+    /// The zip is always named `update.zip` — verify both the full filename and
+    /// the extension in one assertion to avoid redundant checks.
+    @Test func fixedZipURL_hasExpectedFilename() {
         let updater = makeUpdater()
         #expect(updater.fixedZipURL.lastPathComponent == "update.zip")
-    }
-
-    @Test func fixedZipURL_extensionIsZip() {
-        let updater = makeUpdater()
         #expect(updater.fixedZipURL.pathExtension == "zip")
     }
 

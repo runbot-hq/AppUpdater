@@ -4,6 +4,15 @@ import Foundation
 import Testing
 @testable import AppUpdater
 
+// MARK: - Counter
+
+/// Reference-type counter safe to capture in `@Sendable` closures.
+/// All access is driven from `@MainActor` test code; `@unchecked Sendable`
+/// suppresses the compiler warning without introducing real data races.
+private final class Counter: @unchecked Sendable {
+    var value = 0
+}
+
 // MARK: - AppUpdaterFetchTests
 
 /// Tests that verify `AppUpdater.checkAndHandle` drives host state correctly
@@ -12,6 +21,7 @@ import Testing
 /// Zero `DispatchQueue` usage (Pillar 5). All tests run on `@MainActor`
 /// because `AppUpdater` and `MockUpdateState` are both `@MainActor`.
 @MainActor
+@Suite("AppUpdater.checkAndHandle")
 struct AppUpdaterFetchTests {
 
     // MARK: - Helpers
@@ -34,12 +44,25 @@ struct AppUpdaterFetchTests {
         return (updater, provider, state)
     }
 
+    private func makeStackWithBetaProvider(
+        betaChannelProvider: @Sendable @escaping () -> Bool
+    ) -> (updater: AppUpdater, provider: MockReleaseProvider, state: MockUpdateState) {
+        let provider = MockReleaseProvider()
+        let state = MockUpdateState()
+        let domain = "AppUpdaterFetchTests.betaProvider.\(UUID().uuidString)"
+        let updater = AppUpdater(
+            repo: "owner/repo",
+            currentVersion: "1.0.0",
+            assetName: { _ in "App.zip" },
+            schedulerIdentifier: domain,
+            betaChannelProvider: betaChannelProvider,
+            releaseProvider: provider
+        )
+        return (updater, provider, state)
+    }
+
     /// Builds an `AvailableRelease` with a matching `App.zip` asset **and** a
     /// real `checksumURL` (pointing at a `.sha256` sidecar).
-    ///
-    /// `handle()` guards on `release.checksumURL != nil` before applying any
-    /// phase — a nil checksum causes an early return with no state transition,
-    /// which would silently break every test that expects `.available`.
     private func makeRelease(
         tagName: String = "v2.0.0"
     ) throws -> AvailableRelease {
@@ -65,7 +88,7 @@ struct AppUpdaterFetchTests {
         let (updater, provider, state) = makeStack()
         await provider.set(releaseToReturn: try makeRelease())
         await updater.checkAndHandle(state: state)
-        // At minimum the .available phase must have been applied.
+
         let hasAvailable = state.appliedPhases.contains {
             if case .available = $0 { return true }
             return false
@@ -73,17 +96,18 @@ struct AppUpdaterFetchTests {
         #expect(hasAvailable)
     }
 
+    /// Up-to-date path: release tag matches `currentVersion` exactly (no v-prefix)
+    /// so `isNewer` returns false and no phase transition fires.
+    /// v-prefix stripping is tested separately in `UpdateCheckerIsNewerTests`.
     @Test func checkAndHandle_upToDate_noPhaseTransition() async throws {
-        // Provider returns the same version as currentVersion → .upToDate
         let (updater, provider, state) = makeStack(currentVersion: "2.0.0")
-        await provider.set(releaseToReturn: try makeRelease(tagName: "v2.0.0"))
+        await provider.set(releaseToReturn: try makeRelease(tagName: "2.0.0"))
         await updater.checkAndHandle(state: state)
         #expect(state.appliedPhases.isEmpty)
     }
 
     @Test func checkAndHandle_nilRelease_noPhaseTransition() async throws {
         let (updater, _, state) = makeStack()
-        // Default releaseToReturn is nil — no phase transitions expected.
         await updater.checkAndHandle(state: state)
         #expect(state.appliedPhases.isEmpty)
     }
@@ -116,5 +140,37 @@ struct AppUpdaterFetchTests {
         let count = await provider.fetchCallCount
         #expect(count == 1)
         _ = state
+    }
+
+    // MARK: - Step 9: betaChannelProvider closure call timing
+
+    /// Verifies the stored `betaChannelProvider` closure is invoked during
+    /// `checkAndHandle` — not captured once at init. The counter increments
+    /// inside the closure; if the closure were never called `counter.value`
+    /// would stay 0.
+    ///
+    /// Note: `checkForUpdate(betaChannel:)` takes `betaChannel` as a parameter
+    /// and does NOT call the stored closure — this test must use `checkAndHandle`.
+    @Test func checkAndHandle_betaChannelProvider_isCalled() async throws {
+        let counter = Counter()
+        let (updater, _, state) = makeStackWithBetaProvider {
+            counter.value += 1
+            return false
+        }
+        await updater.checkAndHandle(state: state)
+        #expect(counter.value == 1)
+    }
+
+    /// Verifies the closure is called fresh on each `checkAndHandle` invocation
+    /// rather than being resolved once and cached.
+    @Test func checkAndHandle_betaChannelProvider_calledOnEachInvocation() async throws {
+        let counter = Counter()
+        let (updater, _, state) = makeStackWithBetaProvider {
+            counter.value += 1
+            return false
+        }
+        await updater.checkAndHandle(state: state)
+        await updater.checkAndHandle(state: state)
+        #expect(counter.value == 2)
     }
 }

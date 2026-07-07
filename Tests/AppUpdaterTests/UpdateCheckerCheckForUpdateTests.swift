@@ -13,6 +13,7 @@ import Testing
 /// These tests stay synchronous and never touch the network: all input is
 /// derived from the JSON fixtures loaded via `Bundle.module`. Zero
 /// `DispatchQueue` usage (Pillar 5).
+@Suite("UpdateChecker.evaluate")
 struct UpdateCheckerCheckForUpdateTests {
 
     // MARK: - Fixture helpers
@@ -47,15 +48,13 @@ struct UpdateCheckerCheckForUpdateTests {
         )
     }
 
+    /// Builds a minimal `AvailableRelease` with a custom tag and no assets.
+    private func release(tag: String) -> AvailableRelease {
+        AvailableRelease(tagName: tag, assets: [], checksumURL: nil)
+    }
+
     // MARK: - missingVersionKey
 
-    /// Verifies that `evaluate` returns `.missingVersionKey` when
-    /// `currentVersion` is empty and the fetch succeeded (no failure).
-    ///
-    /// Calls `evaluate` directly with `.fetched(nil)` — purely synchronous,
-    /// no network. The public `checkForUpdate` makes a real network request
-    /// which fails in CI, and `.failed` takes priority over `.missingVersionKey`,
-    /// so the public entry point cannot be used to test this path.
     @Test func emptyCurrentVersion_returnsMissingVersionKey() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(nil),
@@ -69,12 +68,6 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// Verifies that `evaluate` returns `.missingVersionKey` when
-    /// `currentVersion` is empty and a non-nil release was fetched.
-    ///
-    /// Pins the priority-order guarantee from the `evaluate` doc comment:
-    /// `.failed` is checked first, then `currentVersion.isEmpty`. A non-nil
-    /// `.fetched(release)` must not bypass the empty-version guard.
     @Test func fetchedNonNilRelease_emptyVersion_returnsMissingVersionKey() throws {
         let release = try #require(try firstRelease(fromFixture: "releases.newer"))
         let result = UpdateChecker.evaluate(
@@ -89,13 +82,6 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// Verifies that `.failed` takes priority over `currentVersion.isEmpty`.
-    ///
-    /// When both conditions hold — fetch failed AND `currentVersion` is empty —
-    /// `evaluate` must return `.failed(.noReleasesFound)`, not
-    /// `.failed(.missingVersionKey)`. This pins the priority-order guarantee
-    /// documented in the `evaluate` doc comment so a future refactor cannot
-    /// accidentally swap the order.
     @Test func failedFetchResult_emptyVersion_returnsNoReleasesFound() {
         let result = UpdateChecker.evaluate(
             fetchResult: .failed,
@@ -105,6 +91,53 @@ struct UpdateCheckerCheckForUpdateTests {
               let checkError = error as? UpdateCheckError,
               checkError == .noReleasesFound else {
             Issue.record("Expected .failed(.noReleasesFound), got \(result)")
+            return
+        }
+    }
+
+    // MARK: - Malformed semver
+
+    /// A garbage `currentVersion` string with a nil-fetched release must not
+    /// crash — `evaluate` must return `.upToDate` (no release to offer).
+    @Test func malformedCurrentVersion_fetchedNil_returnsUpToDate() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(nil),
+            currentVersion: "not-a-version"
+        )
+        guard case .upToDate = result else {
+            Issue.record("Expected .upToDate for malformed currentVersion with nil release, got \(result)")
+            return
+        }
+    }
+
+    /// A garbage `currentVersion` with a valid release tag must not crash.
+    /// `ParsedVersion` returns `nil` for non-semver input and `isNewer` treats
+    /// a nil current version as `0.0.0`, so any parseable release tag wins and
+    /// `evaluate` returns `.updateAvailable`. This pins that production
+    /// fallback; a deliberate change to return `.failed` instead would require
+    /// updating this test and `ParsedVersion` together.
+    @Test func malformedCurrentVersion_withValidRelease_returnsUpdateAvailable() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(release(tag: "v2.0.0")),
+            currentVersion: "not-a-version"
+        )
+        guard case .updateAvailable = result else {
+            Issue.record("Expected .updateAvailable for malformed currentVersion with valid tag, got \(result)")
+            return
+        }
+    }
+
+    /// A garbage release `tagName` with a valid `currentVersion` must not crash.
+    /// `ParsedVersion` returns `nil` for the tag, so `isNewer` treats it as
+    /// `0.0.0` — which can never beat a real version — and `evaluate` returns
+    /// `.upToDate`.
+    @Test func malformedReleaseTag_validCurrentVersion_returnsUpToDate() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(release(tag: "not-a-version")),
+            currentVersion: "1.0.0"
+        )
+        guard case .upToDate = result else {
+            Issue.record("Expected .upToDate for malformed release tag, got \(result)")
             return
         }
     }
@@ -142,11 +175,10 @@ struct UpdateCheckerCheckForUpdateTests {
 
     @Test func fixtureBeta_isNewerThan100() throws {
         let release = try #require(try firstRelease(fromFixture: "releases.beta"))
-        // 2.0.0-beta.1 has a higher major than 1.0.0 — still newer.
         #expect(UpdateChecker.isNewer(release.tagName, than: "1.0.0"))
     }
 
-    // MARK: - Semver guard: fixture-tag compared to same version is not newer
+    // MARK: - Semver guard
 
     @Test func fixtureNewer_v200_notNewerThanItself() throws {
         let release = try #require(try firstRelease(fromFixture: "releases.newer"))
@@ -156,23 +188,15 @@ struct UpdateCheckerCheckForUpdateTests {
 
 // MARK: - FixtureRelease
 
-/// A minimal Decodable mirror of the JSON fixture shape. Decodes only the
-/// fields needed by these tests; extra fields are ignored.
+/// A minimal Decodable mirror of the JSON fixture shape.
 private struct FixtureRelease: Decodable {
-    /// The git tag name (e.g. `"v2.0.0"`).
     let tagName: String
-    /// `true` when GitHub has marked this as a pre-release.
     let prerelease: Bool
-    /// The binary assets attached to this release.
     let assets: [ReleaseAsset]
 
-    /// Maps Swift property names to the fixture JSON's snake_case keys.
     enum CodingKeys: String, CodingKey {
-        /// Maps to `"tag_name"`.
         case tagName = "tag_name"
-        /// Maps to `"prerelease"`.
         case prerelease
-        /// Maps to `"assets"`.
         case assets
     }
 }

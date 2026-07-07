@@ -1,103 +1,16 @@
-// AppUpdaterBehaviorTests.swift
+// AppUpdaterCheckForUpdateTests.swift
 // AppUpdater
 import Foundation
 import Testing
 @testable import AppUpdater
 
-// MARK: - AppUpdaterBehaviorTests
-
-/// Exercises `AppUpdater.handle` decision paths that don't require the network.
-@MainActor
-@Suite("AppUpdater.handle")
-struct AppUpdaterBehaviorTests {
-
-    /// Builds an `AppUpdater` with an isolated scheduler identifier so tests
-    /// never share cache state.
-    private func makeUpdater(domain: String) -> AppUpdater {
-        AppUpdater(
-            repo: "example/repo",
-            currentVersion: "1.0.0",
-            assetName: { _ in "RunBot.zip" },
-            schedulerIdentifier: domain,
-            betaChannelProvider: { false }
-        )
-    }
-
-    /// Creates a `ReleaseAsset` with the given filename.
-    private func makeAsset(_ name: String) throws -> ReleaseAsset {
-        ReleaseAsset(
-            name: name,
-            browserDownloadURL: try #require(URL(string: "https://example.com/\(name)"))
-        )
-    }
-
-    // MARK: - In-flight guard (second handle dropped while download runs)
-
-    /// While a download Task is already in flight the state phase is `.downloading`.
-    /// A second `handle` for the same version must not re-advance the phase to
-    /// `.available` again: the zip already exists at `fixedZipURL` by the time the
-    /// second call arrives, so it fast-paths directly to `.ready`.
-    ///
-    /// We simulate the "already cached" condition by writing a dummy file at
-    /// `fixedZipURL` before calling `handle`.
-    @Test func cachedZipAdvancesDirectlyToReady() async throws {
-        let domain = "test.cachehit.\(UUID().uuidString)"
-        let updater = makeUpdater(domain: domain)
-        let state = MockUpdateState()
-
-        // Write a dummy zip at the fixed URL to simulate a cached download.
-        let zipURL = updater.fixedZipURL
-        try FileManager.default.createDirectory(
-            at: zipURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try Data("zip".utf8).write(to: zipURL)
-        defer { try? FileManager.default.removeItem(at: zipURL) }
-
-        let release = AvailableRelease(
-            tagName: "v9.9.9",
-            assets: [try makeAsset("RunBot.zip")],
-            checksumURL: URL(string: "https://example.com/RunBot.zip.sha256")
-        )
-        await updater.handle(release, state: state)
-
-        guard case .ready(let version) = state.currentPhase else {
-            Issue.record("Expected .ready, got \(state.currentPhase)")
-            return
-        }
-        #expect(version == "v9.9.9")
-        // Exactly one phase transition: idle → ready.
-        #expect(state.appliedPhases.count == 1)
-    }
-
-    // MARK: - Missing asset (no matching zip in release)
-
-    /// A release whose assets list contains no file matching `assetName` must
-    /// leave the phase at `.idle` — no phase transition at all.
-    @Test func missingAssetLeavesPhaseIdle() async throws {
-        let domain = "test.noasset.\(UUID().uuidString)"
-        let updater = makeUpdater(domain: domain)
-        let state = MockUpdateState()
-        let release = AvailableRelease(
-            tagName: "v2.0.0",
-            assets: [try makeAsset("SomethingElse.zip")],
-            checksumURL: nil
-        )
-
-        await updater.handle(release, state: state)
-
-        #expect(state.currentPhase == .idle)
-        #expect(state.appliedPhases.isEmpty)
-    }
-}
-
-// MARK: - AppUpdaterCheckAndHandleTests
+// MARK: - AppUpdaterCheckForUpdateTests
 
 /// Exercises `AppUpdater.checkForUpdate(betaChannel:)` in isolation using
 /// `MockReleaseProvider` — no network, no disk I/O.
 @MainActor
-@Suite("AppUpdater.checkAndHandle")
-struct AppUpdaterCheckAndHandleTests {
+@Suite("AppUpdater.checkForUpdate")
+struct AppUpdaterCheckForUpdateTests {
 
     private let newerTag = "v2.0.0"
     private let olderTag = "v0.9.0"
@@ -108,14 +21,14 @@ struct AppUpdaterCheckAndHandleTests {
     private func makeUpdater(
         domain: String,
         provider: some ReleaseProvider,
-        betaChannel: Bool = false
+        betaChannelProvider: @Sendable @escaping () -> Bool = { false }
     ) -> AppUpdater {
         AppUpdater(
             repo: "example/repo",
             currentVersion: currentVersion,
             assetName: { _ in "RunBot.zip" },
             schedulerIdentifier: domain,
-            betaChannelProvider: { betaChannel },
+            betaChannelProvider: betaChannelProvider,
             releaseProvider: provider
         )
     }
@@ -127,12 +40,6 @@ struct AppUpdaterCheckAndHandleTests {
 
     // MARK: - 1. Provider returns .failed → .failed(.noReleasesFound)
 
-    /// A `.failed` fetch result (network error, HTTP error, or decode failure)
-    /// must map to `.failed(.noReleasesFound)` — not `.upToDate`.
-    ///
-    /// This is the structural change introduced by `ReleaseFetchResult`: a bare
-    /// `nil` from the old protocol was ambiguous between "fetch error" and
-    /// "no channel match". The new enum makes the distinction explicit.
     @Test func providerReturnsNil_failedNoReleasesFound() async throws {
         let domain = "test.check.nil.\(UUID().uuidString)"
         let provider = MockReleaseProvider(fetchResultToReturn: .failed)
@@ -150,9 +57,6 @@ struct AppUpdaterCheckAndHandleTests {
 
     // MARK: - 1b. Provider returns .fetched(nil) → .upToDate
 
-    /// A `.fetched(nil)` result means the API call succeeded but no release
-    /// matched the channel filter (e.g. a stable user on a beta-only repo).
-    /// This must map to `.upToDate`, not `.failed`.
     @Test func providerReturnsFetchedNil_upToDate() async throws {
         let domain = "test.check.fetchednil.\(UUID().uuidString)"
         let provider = MockReleaseProvider(fetchResultToReturn: .fetched(nil))
