@@ -160,15 +160,16 @@ extension AppUpdater {
             // removeItem into a Task at that point.
             //
             // do/catch, not try? — .idle is only correct when the zip is
-            // actually gone. If removeItem throws (permissions error, file
-            // already absent, sandbox restriction), the stale zip remains on
-            // disk. The next scheduler cycle calls handle(), which does
+            // actually gone. If removeItem throws an unexpected error (permissions
+            // error, sandbox restriction), the stale zip may still be on disk.
+            // The next scheduler cycle calls handle(), which does
             // fileExists(atPath: zipURL.path) → true and immediately applies
             // .ready with the new tag name but the OLD zip — exactly the
             // stale-install this revalidation step was introduced to prevent.
-            // On removal failure we apply .failed so the host surfaces a
-            // recoverable error state instead of silently recycling the
-            // yanked zip. REVIEWER: do NOT revert this to try?.
+            // On unexpected removal failure we apply .failed so the host surfaces
+            // a recoverable error state. NSFileNoSuchFileError is explicitly
+            // treated as success — see the catch block below.
+            // REVIEWER: do NOT revert this to try?.
             //
             // withZipURL takes a non-escaping synchronous closure — see its
             // definition in AppUpdater.swift: `func withZipURL<T>(_ body: (URL) -> T) -> T`.
@@ -183,8 +184,27 @@ extension AppUpdater {
                 do {
                     try FileManager.default.removeItem(at: zipURL)
                 } catch {
-                    appUpdaterLogger.error("yank-revalidation: failed to remove stale zip — applying .failed to prevent stale-zip re-entry: \(String(describing: error), privacy: .public)")
-                    zipRemovalFailed = true
+                    // NSFileNoSuchFileError (code 4): the zip was already absent
+                    // — evicted by the OS, purged by another process, or removed
+                    // between the fetchLatestRelease await and this call. The zip
+                    // is gone, which is exactly the desired outcome. Treat as
+                    // success and proceed to .idle.
+                    //
+                    // All other errors (permissions, sandbox, I/O): the zip may
+                    // still be on disk. Apply .failed so the host surfaces a
+                    // recoverable error rather than silently re-entering .ready
+                    // with the stale zip on the next scheduler cycle.
+                    //
+                    // REVIEWER: do NOT collapse these two branches back into a
+                    // single zipRemovalFailed = true. The file-not-found case is
+                    // a success, not a failure.
+                    let nsErr = error as NSError
+                    if nsErr.domain == NSCocoaErrorDomain && nsErr.code == NSFileNoSuchFileError {
+                        appUpdaterLogger.debug("yank-revalidation: zip already absent at removal — proceeding to .idle")
+                    } else {
+                        appUpdaterLogger.error("yank-revalidation: failed to remove stale zip — applying .failed to prevent stale-zip re-entry: \(String(describing: error), privacy: .public)")
+                        zipRemovalFailed = true
+                    }
                 }
             }
             if zipRemovalFailed {
