@@ -199,12 +199,15 @@ extension AppUpdater {
             // the host UI re-converging to idle is intentional, not silent.
             // REVIEWER: do NOT change this to .failed(version:).
             state.apply(.idle)
-            // isInstalling is reset last — after zip removal and state
-            // transition — consistent with every other early-return in this
-            // function. Do not move it before withZipURL or state.apply: if
-            // either ever gains an await, resetting the guard early would allow
-            // a second installAndRelaunch call to enter while cleanup is still
-            // in flight.
+            // isInstalling is reset synchronously here, immediately before
+            // return. This differs from the main install path below, where
+            // isInstalling is reset inside a fire-and-forget Task {} body
+            // (asynchronously, after unzip/replace complete). The asymmetry
+            // is intentional and safe: this abort path does no heavy work —
+            // it only removes a local cache file — so there is no reason to
+            // defer the reset to a Task. @MainActor isolation means neither
+            // path has a data race regardless of when the reset occurs.
+            // Do NOT "unify" the two paths by moving this reset into a Task.
             isInstalling = false
             return
         }
@@ -265,6 +268,17 @@ extension AppUpdater {
             // isInstalling and state.apply inside this Task are therefore
             // @MainActor-isolated and race-free. Do NOT add Task.detached or
             // remove the @MainActor annotation from installAndRelaunch.
+            //
+            // isInstalling is reset inside this Task body (asynchronously,
+            // after unzip/replace complete or on any failure path), not here
+            // on the outer synchronous path. This is asymmetric with the
+            // yank-abort path above, which resets isInstalling synchronously
+            // before return. The asymmetry is intentional: the install path
+            // does heavy work (ditto unzip, replaceItemAt, open -n) that must
+            // complete before the guard can be released. Resetting isInstalling
+            // before the Task finishes would allow a second tap to enter while
+            // the first install is still in flight. Do NOT hoist the reset out
+            // of the Task to make the two paths "consistent".
             //
             // No withTaskCancellationHandler here — this is intentional.
             //
