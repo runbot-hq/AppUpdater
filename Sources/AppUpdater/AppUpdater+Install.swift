@@ -226,6 +226,32 @@ extension AppUpdater {
             // isInstalling and state.apply inside this Task are therefore
             // @MainActor-isolated and race-free. Do NOT add Task.detached or
             // remove the @MainActor annotation from installAndRelaunch.
+            //
+            // No withTaskCancellationHandler here — this is intentional.
+            //
+            // The structural observation: if this Task were cancelled before
+            // completing, isInstalling would remain true for the session and
+            // the Install button would appear locked. That would be a real
+            // bug — but only if a caller holds the task handle and calls
+            // .cancel() on it.
+            //
+            // No such caller exists in this codebase. AppUpdater does not
+            // expose the task handle, does not store it, and provides no
+            // cancel-install API. The only path to cancellation would be the
+            // host storing the Void-discarded task handle returned by Task{},
+            // which this library explicitly does not support.
+            //
+            // Additionally, isInstalling is a transient in-memory flag — it
+            // does not survive process termination. The normal terminal state
+            // for a successful install is NSApp.terminate(nil), after which
+            // the flag ceases to exist entirely. There is no "locked forever"
+            // scenario across sessions.
+            //
+            // If AppUpdater ever gains a cancellable install API (e.g. a
+            // public cancelInstall() method or an exposed Task handle), add
+            // withTaskCancellationHandler at that point to reset isInstalling
+            // and apply .idle. Until then, do not add it — the risk is
+            // theoretical and the added complexity is not justified.
             Task {
                 guard let appInZip = await unzipAndLocateApp(zipURL: zipURL, into: tmpDir) else {
                     isInstalling = false
