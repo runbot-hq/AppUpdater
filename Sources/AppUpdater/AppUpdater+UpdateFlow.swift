@@ -55,7 +55,7 @@ extension AppUpdater {
     /// 3. Otherwise advances to `.available` and starts a background download.
     public func handle(_ release: AvailableRelease, state: any UpdateStateProviding) async {
 
-        // ── 1. Already cached? ───────────────────────────────────────────────
+        // ── 1. Already cached? ──────────────────────────────────────────────
         // withZipURL snapshots fixedZipURL once. The same URL is used for the
         // existence check here AND passed into downloadUpdate as `destination`,
         // so both operations are guaranteed to target the exact same path.
@@ -76,13 +76,12 @@ extension AppUpdater {
         // session, then correct. Not a permanent downgrade.
         //
         // YANKED RELEASE: if a release is yanked from GitHub after the zip is
-        // cached but before the user taps Install, the cached zip will still be
-        // served as .ready and the user may install the yanked binary. Closing
-        // this gap would require a live GitHub re-validation call at install
-        // time — adding a network dependency to a step that is currently fully
-        // offline. This is over-engineering for the current use case (RunBot
-        // has no yank/recall mechanism and has never yanked a release).
-        // Tracked in issue #2 with full rationale and a proposed fix.
+        // cached but before the user taps Install, a live re-validation call is
+        // made to GitHub at install time in `installAndRelaunch` before the
+        // bundle swap. If GitHub returns a different latest tag, the cached zip
+        // is wiped and state resets to .idle so the next scheduler cycle
+        // re-downloads the correct release. This closes the yank gap described
+        // in issue #2, closed by PR #23.
         //
         // PARTIAL WRITE: if a prior download was interrupted mid-move, a
         // partial file may sit at fixedZipURL. fileExists returns true,
@@ -140,7 +139,7 @@ extension AppUpdater {
                 return
             }
 
-            // ── 2. Asset or checksum sidecar absent? ─────────────────────────────
+            // ── 2. Asset or checksum sidecar absent? ───────────────────────────────
             let wantedAsset = assetName(release.tagName)
             guard let asset = release.assets.first(where: { $0.name == wantedAsset }) else {
                 appUpdaterLogger.warning("release \(release.tagName, privacy: .public) has no asset named \(wantedAsset, privacy: .public) — skipping download")
@@ -151,7 +150,7 @@ extension AppUpdater {
                 return
             }
 
-            // ── 3. Advance to .available and start download ──────────────────────
+            // ── 3. Advance to .available and start download ────────────────────────
             state.apply(.available(version: release.tagName))
 
             let downloadURL = asset.browserDownloadURL
