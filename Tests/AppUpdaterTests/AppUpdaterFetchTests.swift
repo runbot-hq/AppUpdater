@@ -70,9 +70,12 @@ struct AppUpdaterFetchTests {
         #expect(hasAvailable)
     }
 
+    /// Up-to-date path: release tag matches `currentVersion` exactly (no v-prefix)
+    /// so `isNewer` returns false and no phase transition fires.
+    /// v-prefix stripping is tested separately in `UpdateCheckerIsNewerTests`.
     @Test func checkAndHandle_upToDate_noPhaseTransition() async throws {
         let (updater, provider, state) = makeStack(currentVersion: "2.0.0")
-        await provider.set(releaseToReturn: try makeRelease(tagName: "v2.0.0"))
+        await provider.set(releaseToReturn: try makeRelease(tagName: "2.0.0"))
         await updater.checkAndHandle(state: state)
         #expect(state.appliedPhases.isEmpty)
     }
