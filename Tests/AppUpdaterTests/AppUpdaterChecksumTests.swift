@@ -40,6 +40,9 @@ struct AppUpdaterChecksumTests {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// SHA-256 of zero bytes — a well-known constant used in the zero-byte tests.
+    private let emptyDataSHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
     // MARK: - verifyChecksum — matching digest
 
     @Test func verifyChecksum_matchingDigest_doesNotThrow() async throws {
@@ -68,14 +71,42 @@ struct AppUpdaterChecksumTests {
     }
 
     /// An empty `expectedHex` string can never match any real SHA-256 digest,
-    /// so `verifyChecksum` must throw `URLError.cannotDecodeContentData` —
-    /// the same error as any other mismatch.
+    /// so `verifyChecksum` must throw `URLError.cannotDecodeContentData`.
     @Test func verifyChecksum_emptyExpectedHex_throwsCannotDecodeContentData() async throws {
         let url = try writeTempFile(Data("any content".utf8))
         defer { try? FileManager.default.removeItem(at: url) }
         var thrown: Error?
         do {
             try await verifyChecksum(zipURL: url, expectedHex: "")
+        } catch {
+            thrown = error
+        }
+        let urlError = try #require(thrown as? URLError)
+        #expect(urlError.code == .cannotDecodeContentData)
+    }
+
+    // MARK: - verifyChecksum — zero-byte file
+
+    /// A zero-byte file is distinct from a missing file: it opens successfully
+    /// and produces a real SHA-256 (the empty-data digest). When the expected
+    /// hex matches that digest, `verifyChecksum` must not throw.
+    @Test func verifyChecksum_zeroByteFile_matchingEmptyDigest_doesNotThrow() async throws {
+        let url = try writeTempFile(Data())
+        defer { try? FileManager.default.removeItem(at: url) }
+        // Must not throw — the file exists and its digest matches.
+        try await verifyChecksum(zipURL: url, expectedHex: emptyDataSHA256)
+    }
+
+    /// When the expected hex does NOT match the zero-byte file’s digest,
+    /// `verifyChecksum` must throw `URLError.cannotDecodeContentData` —
+    /// the same error as any other mismatch.
+    @Test func verifyChecksum_zeroByteFile_wrongDigest_throwsCannotDecodeContentData() async throws {
+        let url = try writeTempFile(Data())
+        defer { try? FileManager.default.removeItem(at: url) }
+        let wrongHex = sha256Hex(Data("not empty".utf8))
+        var thrown: Error?
+        do {
+            try await verifyChecksum(zipURL: url, expectedHex: wrongHex)
         } catch {
             thrown = error
         }
