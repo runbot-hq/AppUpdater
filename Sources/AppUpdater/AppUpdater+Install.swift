@@ -172,9 +172,12 @@ extension AppUpdater {
             //
             // withZipURL takes a non-escaping synchronous closure — see its
             // definition in AppUpdater.swift: `func withZipURL<T>(_ body: (URL) -> T) -> T`.
-            // The closure runs to completion and returns before withZipURL
-            // returns, so zipRemovalFailed is fully written before the if check
-            // below reads it. There is no race here. Do not add @escaping.
+            // The closure body itself runs to completion and returns before
+            // withZipURL returns (T = Void here), so zipRemovalFailed is fully
+            // written before the if check below reads it. There is no race.
+            // This path does not spawn a Task inside the closure, so "closure
+            // body completes" and "all side-effectful work completes" mean the
+            // same thing here. Do not add @escaping.
             var zipRemovalFailed = false
             withZipURL { zipURL in
                 do {
@@ -264,6 +267,17 @@ extension AppUpdater {
         // Resetting it here — before the Task starts its heavy work — would
         // allow a second installAndRelaunch call to enter while the first install
         // is still in flight. Do NOT add isInstalling = false before this call.
+        //
+        // CONCURRENCY NOTE: the withZipURL closure body completes synchronously
+        // (it only creates a Task and returns Void — T = Void). withZipURL
+        // returns as soon as the closure body returns. However, the Task spawned
+        // inside the closure continues running asynchronously after withZipURL
+        // returns — it outlives the closure body. "The closure runs to completion"
+        // means the closure body itself, not the Task it spawns. zipURL is a URL
+        // value type (Sendable struct), so the Task captures an independent copy;
+        // there is no dangling reference. This is safe, but the asymmetry between
+        // "closure body is synchronous" and "work is asynchronous" is intentional
+        // and worth noting for anyone auditing concurrent behaviour here.
         withZipURL { zipURL in
             let bundleURL = URL(fileURLWithPath: Bundle.main.bundlePath)
             let tmpDir = FileManager.default.temporaryDirectory
