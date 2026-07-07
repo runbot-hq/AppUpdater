@@ -47,7 +47,6 @@ struct AppUpdaterChecksumTests {
         let url = try writeTempFile(payload)
         defer { try? FileManager.default.removeItem(at: url) }
         let expectedHex = sha256Hex(payload)
-        // Must not throw
         try await verifyChecksum(zipURL: url, expectedHex: expectedHex)
     }
 
@@ -100,13 +99,11 @@ struct AppUpdaterChecksumTests {
 
     // MARK: - fixedZipURL
 
-    @Test func fixedZipURL_filenameIsUpdateZip() {
+    /// The zip is always named `update.zip` — verify both the full filename and
+    /// the extension in one assertion to avoid redundant checks.
+    @Test func fixedZipURL_hasExpectedFilename() {
         let updater = makeUpdater()
         #expect(updater.fixedZipURL.lastPathComponent == "update.zip")
-    }
-
-    @Test func fixedZipURL_extensionIsZip() {
-        let updater = makeUpdater()
         #expect(updater.fixedZipURL.pathExtension == "zip")
     }
 
