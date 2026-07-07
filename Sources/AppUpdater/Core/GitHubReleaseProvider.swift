@@ -15,13 +15,25 @@ import Foundation
 /// sites require no changes.
 public struct GitHubReleaseProvider: ReleaseProvider {
 
-    // MARK: - Private types
+    // MARK: - Internal types
 
     /// Lightweight mirror of the GitHub Releases API response object.
     ///
     /// Only the fields needed for version comparison and asset resolution are
     /// decoded; all other API fields are ignored.
-    private struct Release: Decodable {
+    ///
+    /// ## Access level: internal (not private)
+    ///
+    /// This type is `internal` rather than `private` so that
+    /// `GitHubReleaseProviderDecodeTests` can exercise the `JSONDecoder` +
+    /// `CodingKeys` mapping directly against raw fixture JSON. The decode
+    /// behaviour of `tag_name → tagName` is load-bearing for
+    /// `installAndRelaunch`'s yank-revalidation string-equality check — it
+    /// must be tested at the real decoder level, not mocked.
+    ///
+    /// ❌ DO NOT make this `public`. It is an implementation detail of
+    /// `GitHubReleaseProvider`; only the test target needs access.
+    struct Release: Decodable {
         /// The git tag name of this release (e.g. `"v0.8.0"`).
         let tagName: String
         /// `true` when GitHub has marked this release as a pre-release.
@@ -88,6 +100,15 @@ public struct GitHubReleaseProvider: ReleaseProvider {
         }
         let checksumAssetName = assetName(latest.tagName) + ".sha256"
         let checksumAsset = latest.assets.first(where: { $0.name == checksumAssetName })
+        // tagName is passed through verbatim from Release.tagName with no
+        // normalisation (no v-stripping, no lowercasing, no trimming).
+        // AvailableRelease has no init logic that transforms it — it is a
+        // plain memberwise assignment. This is the format-parity invariant
+        // that installAndRelaunch's string-equality revalidation check depends
+        // on: both sides of the != comparison are raw GitHub tag strings from
+        // the same field, via the same path. Do NOT add normalisation here or
+        // in AvailableRelease.init without updating the revalidation check and
+        // the decode tests accordingly.
         return .fetched(AvailableRelease(
             tagName: latest.tagName,
             assets: latest.assets,
