@@ -10,11 +10,11 @@ import Testing
 /// `MockUpdateState.currentPhase` / `appliedPhases`.
 ///
 /// Network I/O is avoided throughout:
-/// - “no matching asset” and “no checksum URL” paths return before spawning
+/// - "no matching asset" and "no checksum URL" paths return before spawning
 ///   any download Task.
-/// - The “cached zip” path is exercised by writing a dummy file at
+/// - The "cached zip" path is exercised by writing a dummy file at
 ///   `updater.fixedZipURL` before calling `handle`.
-/// - The “asset present + checksumURL present” path advances to `.available`
+/// - The "asset present + checksumURL present" path advances to `.available`
 ///   synchronously, then the download Task fires asynchronously — we assert
 ///   only the synchronous phase transition here.
 ///
@@ -28,7 +28,7 @@ struct AppUpdaterDownloadTests {
 
     private func makeUpdater(
         currentVersion: String = "1.0.0",
-        assetName: @escaping (AvailableRelease) -> String = { _ in "App.zip" }
+        assetName: @Sendable @escaping (String) -> String = { _ in "App.zip" }
     ) -> (updater: AppUpdater, state: MockUpdateState) {
         let domain = "AppUpdaterDownloadTests.\(UUID().uuidString)"
         let updater = AppUpdater(
@@ -120,7 +120,7 @@ struct AppUpdaterDownloadTests {
     @Test func multipleAssets_noneMatch_phaseStaysIdle() async throws {
         let (updater, state) = makeUpdater(assetName: { _ in "App-arm64.zip" })
 
-        let assets = try [
+        let assets = [
             ReleaseAsset(
                 name: "App-x86_64.zip",
                 browserDownloadURL: try #require(URL(string: "https://example.com/App-x86_64.zip"))

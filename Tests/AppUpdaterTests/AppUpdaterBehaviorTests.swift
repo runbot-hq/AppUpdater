@@ -21,7 +21,7 @@ struct AppUpdaterCheckAndHandleTests {
     private func makeUpdater(
         domain: String,
         provider: some ReleaseProvider,
-        betaChannelProvider: @escaping () -> Bool = { false }
+        betaChannelProvider: @Sendable @escaping () -> Bool = { false }
     ) -> AppUpdater {
         AppUpdater(
             repo: "example/repo",
