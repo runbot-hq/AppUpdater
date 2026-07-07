@@ -6,134 +6,92 @@ import Testing
 
 // MARK: - GitHubReleaseProviderDecodeTests
 
-/// Tests that `GitHubReleaseProvider.fetchLatestRelease` returns
-/// `AvailableRelease.tagName` as an exact, unmodified passthrough of the
-/// `tag_name` field in the GitHub Releases API JSON response.
+/// Tests that `GitHubReleaseProvider.Release` decodes `tag_name` from GitHub
+/// Releases API JSON into `tagName` without any normalisation.
 ///
 /// ## Why this test exists
 ///
 /// `installAndRelaunch` compares `latest.tagName != version` using raw string
-/// equality to decide whether to abort a yank-revalidation. That comparison
-/// is only correct if `tagName` is the unmodified API value — no leading-`v`
+/// equality for yank-revalidation. That comparison is only correct if
+/// `tagName` is the exact unmodified value from the API — no leading-`v`
 /// stripping, no lowercasing, no trimming.
 ///
 /// `GitHubReleaseProvider.Release` decodes `tag_name` via a custom `CodingKeys`
-/// mapping. If that mapping is ever changed (e.g. a normalisation step is
-/// added to the decoder), the revalidation guard silently starts producing
-/// spurious aborts or misses. This test makes that regression visible.
+/// mapping. If a normalisation step is ever added to that decoder the
+/// revalidation guard silently starts producing spurious aborts or misses.
+/// These tests make that regression visible by decoding raw fixture JSON
+/// directly — no mocks, no network.
 ///
-/// The tests use `MockReleaseProvider` to avoid real network calls. They
-/// verify the `tagName` passthrough at the `AvailableRelease` layer, which is
-/// the surface that `installAndRelaunch` actually reads.
-@MainActor
+/// `Release` is `internal` (not `private`) specifically to allow this.
 struct GitHubReleaseProviderDecodeTests {
 
     // MARK: - Helpers
 
-    /// Builds an `AvailableRelease` with the given `tagName`, simulating what
-    /// `GitHubReleaseProvider.fetchLatestRelease` would return after decoding
-    /// the `tag_name` field from the GitHub API JSON.
-    private func makeRelease(tagName: String) -> AvailableRelease {
-        let base = "https://example.com"
-        let asset = ReleaseAsset(
-            name: "App.zip",
-            // Force-unwrap is acceptable in test helpers — a malformed URL
-            // here is a test authoring error, not a runtime condition.
-            browserDownloadURL: URL(string: "\(base)/App.zip")!
-        )
-        let checksumAsset = ReleaseAsset(
-            name: "App.zip.sha256",
-            browserDownloadURL: URL(string: "\(base)/App.zip.sha256")!
-        )
-        return AvailableRelease(
-            tagName: tagName,
-            assets: [asset, checksumAsset],
-            checksumURL: checksumAsset.browserDownloadURL
-        )
+    /// Minimal valid GitHub Releases API JSON for a single release.
+    /// `assets` is empty — asset parsing is not under test here.
+    private func releaseJSON(tagName: String, prerelease: Bool = false) -> Data {
+        let json = """
+        [{
+            "tag_name": "\(tagName)",
+            "prerelease": \(prerelease),
+            "assets": []
+        }]
+        """
+        return Data(json.utf8)
     }
 
-    // MARK: - tagName passthrough
+    // MARK: - CodingKeys mapping
 
-    /// A standard `v`-prefixed semver tag is returned verbatim.
-    @Test func tagName_vPrefixedSemver_returnedUnmodified() async throws {
-        let provider = MockReleaseProvider()
-        await provider.set(releaseToReturn: makeRelease(tagName: "v1.2.3"))
-        let result = await provider.fetchLatestRelease(
-            repo: "owner/repo",
-            betaChannel: false,
-            assetName: { _ in "App.zip" }
-        )
-        guard case .fetched(let release) = result, let release else {
-            Issue.record("Expected .fetched(release), got \(result)")
-            return
-        }
-        // This is the load-bearing assertion: tagName must be the exact raw
-        // string from the API response. If anything normalises it (strips the
-        // leading "v", lowercases, trims whitespace), the yank-revalidation
-        // comparison `latest.tagName != version` will produce incorrect results.
-        // Do NOT change this to a case-insensitive or prefix-stripped comparison.
+    /// The `tag_name` JSON key maps to `tagName` via `CodingKeys` and the
+    /// value is returned verbatim — a `v`-prefixed semver tag is not modified.
+    @Test func decode_vPrefixedSemver_tagNameIsUnmodified() throws {
+        let data = releaseJSON(tagName: "v1.2.3")
+        let releases = try JSONDecoder().decode([GitHubReleaseProvider.Release].self, from: data)
+        let release = try #require(releases.first)
+        // This is the load-bearing assertion: if the decoder ever normalises
+        // tagName (e.g. strips the leading "v"), this test will catch it before
+        // the regression reaches installAndRelaunch. Do NOT change the expected
+        // value to a stripped form.
         #expect(release.tagName == "v1.2.3")
     }
 
-    /// A tag without a `v` prefix is also returned verbatim (not normalised
-    /// to add a prefix).
-    @Test func tagName_noVPrefix_returnedUnmodified() async throws {
-        let provider = MockReleaseProvider()
-        await provider.set(releaseToReturn: makeRelease(tagName: "1.2.3"))
-        let result = await provider.fetchLatestRelease(
-            repo: "owner/repo",
-            betaChannel: false,
-            assetName: { _ in "App.zip" }
-        )
-        guard case .fetched(let release) = result, let release else {
-            Issue.record("Expected .fetched(release), got \(result)")
-            return
-        }
+    /// A tag without a `v` prefix decodes verbatim — the decoder does not add
+    /// a prefix.
+    @Test func decode_noVPrefix_tagNameIsUnmodified() throws {
+        let data = releaseJSON(tagName: "1.2.3")
+        let releases = try JSONDecoder().decode([GitHubReleaseProvider.Release].self, from: data)
+        let release = try #require(releases.first)
         #expect(release.tagName == "1.2.3")
     }
 
-    /// A pre-release tag with beta suffix is returned verbatim.
-    @Test func tagName_betaSuffix_returnedUnmodified() async throws {
-        let provider = MockReleaseProvider()
-        await provider.set(releaseToReturn: makeRelease(tagName: "v2.0.0-beta.1"))
-        let result = await provider.fetchLatestRelease(
-            repo: "owner/repo",
-            betaChannel: true,
-            assetName: { _ in "App.zip" }
-        )
-        guard case .fetched(let release) = result, let release else {
-            Issue.record("Expected .fetched(release), got \(result)")
-            return
-        }
+    /// A pre-release tag with beta suffix decodes verbatim.
+    @Test func decode_betaSuffix_tagNameIsUnmodified() throws {
+        let data = releaseJSON(tagName: "v2.0.0-beta.1", prerelease: true)
+        let releases = try JSONDecoder().decode([GitHubReleaseProvider.Release].self, from: data)
+        let release = try #require(releases.first)
         #expect(release.tagName == "v2.0.0-beta.1")
     }
 
-    /// The `tagName` value stored in `.ready` at download time originates from
-    /// the same `AvailableRelease.tagName` field. This test confirms that two
-    /// independent calls for the same tag return the same string — the equality
-    /// check in `installAndRelaunch` depends on this identity.
-    @Test func tagName_twoCallsSameTag_stringIdentity() async throws {
-        let tagName = "v3.0.0"
-        let provider = MockReleaseProvider()
-        await provider.set(releaseToReturn: makeRelease(tagName: tagName))
+    /// The `prerelease` field decodes correctly alongside `tag_name`.
+    @Test func decode_prereleaseFlag_decodesCorrectly() throws {
+        let stableData = releaseJSON(tagName: "v1.0.0", prerelease: false)
+        let betaData   = releaseJSON(tagName: "v1.0.0-beta.1", prerelease: true)
 
-        let result1 = await provider.fetchLatestRelease(
-            repo: "owner/repo",
-            betaChannel: false,
-            assetName: { _ in "App.zip" }
-        )
-        let result2 = await provider.fetchLatestRelease(
-            repo: "owner/repo",
-            betaChannel: false,
-            assetName: { _ in "App.zip" }
-        )
+        let stable = try #require(try JSONDecoder().decode([GitHubReleaseProvider.Release].self, from: stableData).first)
+        let beta   = try #require(try JSONDecoder().decode([GitHubReleaseProvider.Release].self, from: betaData).first)
 
-        guard case .fetched(let r1) = result1, let r1,
-              case .fetched(let r2) = result2, let r2 else {
-            Issue.record("Expected two .fetched(release) results")
-            return
+        #expect(stable.prerelease == false)
+        #expect(beta.prerelease == true)
+    }
+
+    /// Decoding fails gracefully when `tag_name` is absent — `Release` is not
+    /// constructed with a default empty string.
+    @Test func decode_missingTagName_throws() {
+        let json = Data("""
+        [{ "prerelease": false, "assets": [] }]
+        """.utf8)
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode([GitHubReleaseProvider.Release].self, from: json)
         }
-        #expect(r1.tagName == r2.tagName)
-        #expect(r1.tagName == tagName)
     }
 }
