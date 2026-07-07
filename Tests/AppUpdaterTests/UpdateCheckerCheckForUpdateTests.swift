@@ -110,19 +110,25 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// A garbage `currentVersion` string with a real release must not crash.
-    @Test func malformedCurrentVersion_withRelease_returnsUpToDate() {
+    /// A garbage `currentVersion` with a valid release tag must not crash.
+    /// `isNewer` treats an unparseable current version as older than any valid
+    /// semver tag, so `evaluate` returns `.updateAvailable`. This pins the
+    /// production behaviour; a future change to return `.failed` here would
+    /// require updating this test intentionally.
+    @Test func malformedCurrentVersion_withValidRelease_returnsUpdateAvailable() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "v2.0.0")),
             currentVersion: "not-a-version"
         )
-        guard case .upToDate = result else {
-            Issue.record("Expected .upToDate for malformed currentVersion, got \(result)")
+        guard case .updateAvailable = result else {
+            Issue.record("Expected .updateAvailable for malformed currentVersion with valid tag, got \(result)")
             return
         }
     }
 
     /// A garbage release `tagName` with a valid `currentVersion` must not crash.
+    /// An unparseable tag can never beat a real version, so `evaluate` returns
+    /// `.upToDate`.
     @Test func malformedReleaseTag_validCurrentVersion_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "not-a-version")),

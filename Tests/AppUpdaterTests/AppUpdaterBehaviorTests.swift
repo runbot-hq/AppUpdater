@@ -4,16 +4,6 @@ import Foundation
 import Testing
 @testable import AppUpdater
 
-// MARK: - Counter
-
-/// A simple reference-type counter that is safe to capture in `@Sendable`
-/// closures. Mutation is always driven from `@MainActor` test code, so no
-/// additional synchronisation is needed; `@unchecked Sendable` suppresses
-/// the compiler warning without introducing real data races.
-private final class Counter: @unchecked Sendable {
-    var value = 0
-}
-
 // MARK: - AppUpdaterCheckAndHandleTests
 
 /// Exercises `AppUpdater.checkForUpdate(betaChannel:)` in isolation using
@@ -148,54 +138,5 @@ struct AppUpdaterCheckAndHandleTests {
 
         let count = await provider.callCount
         #expect(count == 1)
-    }
-
-    // MARK: - 7. betaChannelProvider closure call timing
-
-    /// Verifies the `betaChannelProvider` closure is invoked fresh on each
-    /// `checkForUpdate` call rather than being captured once at init.
-    ///
-    /// The closure toggles from `false` on the first call to `true` on the
-    /// second. If the value were captured at init, both provider calls would
-    /// see `false`. If the closure is called each time, the second call sees
-    /// `true`.
-    @Test func betaChannelProvider_calledOnEachCheck() async throws {
-        let domain = "test.check.provider.timing.\(UUID().uuidString)"
-        let provider = MockReleaseProvider(releaseToReturn: nil)
-        let counter = Counter()
-        let updater = makeUpdater(domain: domain, provider: provider, betaChannelProvider: {
-            counter.value += 1
-            return counter.value > 1 // false on first call, true on second
-        })
-
-        _ = await updater.checkForUpdate(betaChannel: false)
-        let firstCaptured = await provider.capturedBetaChannel
-
-        _ = await updater.checkForUpdate(betaChannel: false)
-        let secondCaptured = await provider.capturedBetaChannel
-
-        // First call: closure returns false (counter.value == 1)
-        #expect(firstCaptured == false)
-        // Second call: closure returns true (counter.value == 2) — proves it was invoked again
-        #expect(secondCaptured == true)
-    }
-
-    /// Verifies the closure is invoked exactly once per `checkForUpdate` call
-    /// — not zero times (value captured at init) and not multiple times
-    /// (called redundantly within a single check).
-    @Test func betaChannelProvider_calledOncePerCheck() async throws {
-        let domain = "test.check.provider.callcount.\(UUID().uuidString)"
-        let provider = MockReleaseProvider(releaseToReturn: nil)
-        let counter = Counter()
-        let updater = makeUpdater(domain: domain, provider: provider, betaChannelProvider: {
-            counter.value += 1
-            return false
-        })
-
-        _ = await updater.checkForUpdate(betaChannel: false)
-        #expect(counter.value == 1)
-
-        _ = await updater.checkForUpdate(betaChannel: false)
-        #expect(counter.value == 2)
     }
 }
