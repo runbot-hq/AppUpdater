@@ -71,19 +71,13 @@ struct AppUpdaterDownloadTests {
 
     /// When the asset matches but `checksumURL` is nil, `handle` logs a warning
     /// and returns without applying any phase transition.
-    @Test func nilChecksumURL_phaseStaysIdle() async throws {
+    /// Asserts both `currentPhase == .idle` and `appliedPhases.isEmpty` to guard
+    /// against any spurious intermediate phase writes.
+    @Test func nilChecksumURL_noPhaseTransitions() async throws {
         let (updater, state) = makeUpdater()
         await updater.handle(try releaseWithNilChecksum(), state: state)
 
         #expect(state.currentPhase == .idle)
-        #expect(state.appliedPhases.isEmpty)
-    }
-
-    /// Nil-checksumURL path: no phase transitions means `appliedPhases` is empty,
-    /// regression guard against any spurious intermediate phase writes.
-    @Test func nilChecksumURL_noAppliedPhases() async throws {
-        let (updater, state) = makeUpdater()
-        await updater.handle(try releaseWithNilChecksum(), state: state)
         #expect(state.appliedPhases.isEmpty)
     }
 
@@ -155,8 +149,8 @@ struct AppUpdaterDownloadTests {
 
     /// Regression: a second `handle` call while a download is in flight arrives
     /// when the zip does not yet exist. `handle` re-advances to `.available`
-    /// (the in-flight guard was removed with `isDownloading`). Verify `.available`
-    /// phase is set on both calls.
+    /// (the in-flight guard was removed with `isDownloading`). Both calls must
+    /// produce a `.available` transition.
     @Test func secondHandle_noZip_advancesToAvailableAgain() async throws {
         let (updater, state) = makeUpdater()
 
@@ -176,7 +170,6 @@ struct AppUpdaterDownloadTests {
         await updater.handle(release, state: state)
         await updater.handle(release, state: state)
 
-        // Both calls should produce .available transitions.
         let availableCount = state.appliedPhases.filter {
             if case .available = $0 { return true }
             return false
