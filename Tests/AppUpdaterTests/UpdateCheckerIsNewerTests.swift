@@ -8,7 +8,8 @@ import Testing
 /// Exhaustive matrix tests for `UpdateChecker.isNewer(_:than:)`.
 ///
 /// Each test covers a distinct semver comparison dimension. No async,
-/// no network, no `DispatchQueue` (Pillar 5). Pure value-level logic tests.
+/// no network, no `DispatchQueue`. Pure value-level logic tests.
+@Suite("UpdateChecker.isNewer")
 struct UpdateCheckerIsNewerTests {
 
     // MARK: - Major
@@ -29,6 +30,11 @@ struct UpdateCheckerIsNewerTests {
 
     @Test func minorVersionLower_returnsFalse() {
         #expect(UpdateChecker.isNewer("1.0.0", than: "1.1.0") == false)
+    }
+
+    /// Lexicographic comparison gives "1.10.0" < "1.9.0" — numeric comparison must return true.
+    @Test func twoDigitMinorComponent_numericNotLexicographic() {
+        #expect(UpdateChecker.isNewer("1.10.0", than: "1.9.0") == true)
     }
 
     // MARK: - Patch
@@ -84,8 +90,14 @@ struct UpdateCheckerIsNewerTests {
         #expect(UpdateChecker.isNewer("1.0.0-beta.1", than: "1.0.0-beta.2") == false)
     }
 
+    /// Numeric beta ordering: beta.10 must beat beta.9 (lexicographic would fail this).
     @Test func betaIndex10_newerThanBetaIndex9() {
         #expect(UpdateChecker.isNewer("1.0.0-beta.10", than: "1.0.0-beta.9") == true)
+    }
+
+    /// The same beta version is not newer than itself.
+    @Test func sameBetaVersion_returnsFalse() {
+        #expect(UpdateChecker.isNewer("1.0.0-beta.2", than: "1.0.0-beta.2") == false)
     }
 
     // MARK: - Cross-version beta vs stable
