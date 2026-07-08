@@ -100,6 +100,40 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
+    @Test func failedFetchResult_returnsHttpError() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .failed(.httpError(statusCode: 429)),
+            currentVersion: ""
+        )
+        guard case .failed(let error) = result,
+              let checkError = error as? UpdateCheckError,
+              case .fetchFailed(let reason) = checkError,
+              case .httpError(let statusCode) = reason
+        else {
+            Issue.record("Expected .failed(.fetchFailed(.httpError)), got \(result)")
+            return
+        }
+        #expect(statusCode == 429)
+    }
+
+    @Test func failedFetchResult_returnsDecodingError() {
+        let simulatedError = DecodingError.dataCorrupted(
+            .init(codingPath: [], debugDescription: "fixture decode failure")
+        )
+        let result = UpdateChecker.evaluate(
+            fetchResult: .failed(.decodingError(underlying: simulatedError)),
+            currentVersion: ""
+        )
+        guard case .failed(let error) = result,
+              let checkError = error as? UpdateCheckError,
+              case .fetchFailed(let reason) = checkError,
+              case .decodingError = reason
+        else {
+            Issue.record("Expected .failed(.fetchFailed(.decodingError)), got \(result)")
+            return
+        }
+    }
+
     // MARK: - Malformed semver
 
     /// A garbage `currentVersion` string with a nil-fetched release must not

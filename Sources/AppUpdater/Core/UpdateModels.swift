@@ -52,6 +52,16 @@ public enum UpdateCheckResult: Sendable {
 /// to let callers distinguish connectivity problems from API-level rejections
 /// and data errors.
 ///
+/// ## Known misclassification — .networkError for malformed repo string
+///
+/// In release builds, a malformed `repo` string passed to `AppUpdater.init`
+/// (one that causes `URL(string:)` to return `nil`) surfaces as
+/// `.networkError(underlying: URLError(.badURL))`. This is a semantic
+/// mismatch — it is a configuration error, not a connectivity failure.
+/// An `assertionFailure` fires in debug builds to catch this immediately.
+/// A dedicated `.configurationError` case is tracked in issue #38 and will
+/// correct this in a future step.
+///
 /// ## Sendable and `underlying: Error` associated values
 ///
 /// `ReleaseFetchError` declares `Sendable` conformance, but its
@@ -68,6 +78,12 @@ public enum UpdateCheckResult: Sendable {
 public enum ReleaseFetchError: Error, Sendable {
     /// The network request itself could not be completed (device offline, DNS
     /// failure, timeout, etc.). The underlying `URLSession` error is attached.
+    ///
+    /// Note: in release builds a malformed `repo` string (configuration error)
+    /// also surfaces as `.networkError(underlying: URLError(.badURL))` — see
+    /// the "Known misclassification" section in the `ReleaseFetchError` doc
+    /// comment above. Use the `assertionFailure` in debug builds to catch this
+    /// before shipping. Fix tracked in issue #38.
     case networkError(underlying: Error)
     /// The GitHub API returned a non-200 HTTP status code (e.g. 403 Forbidden,
     /// 429 Too Many Requests, 500 Internal Server Error).
