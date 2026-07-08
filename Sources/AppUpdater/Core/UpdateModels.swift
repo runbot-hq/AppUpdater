@@ -61,20 +61,6 @@ public enum UpdateCheckResult: Sendable {
 /// An `assertionFailure` fires in debug builds to catch this immediately.
 /// A dedicated `.configurationError` case is tracked in issue #38 and will
 /// correct this in a future step.
-///
-/// ## Sendable and `underlying: Error` associated values
-///
-/// `ReleaseFetchError` declares `Sendable` conformance, but its
-/// `networkError(underlying:)` and `decodingError(underlying:)` cases carry
-/// existential `Error` values. `Error` is not itself `Sendable`-constrained,
-/// so the compiler trusts this conformance rather than enforcing it. In
-/// practice all errors produced by `URLSession` and `JSONDecoder` are
-/// `Sendable`-safe, but a caller that constructs a `ReleaseFetchError` with a
-/// non-`Sendable` custom error type may violate strict concurrency checking
-/// silently. This is a known Swift stdlib limitation with `Error` existentials
-/// and cannot be resolved without changing the associated value type to
-/// `any Error & Sendable` — a breaking API change deferred to a future major
-/// version.
 public enum ReleaseFetchError: Error, Sendable {
     /// The network request itself could not be completed (device offline, DNS
     /// failure, timeout, etc.). The underlying `URLSession` error is attached.
@@ -84,12 +70,12 @@ public enum ReleaseFetchError: Error, Sendable {
     /// the "Known misclassification" section in the `ReleaseFetchError` doc
     /// comment above. Use the `assertionFailure` in debug builds to catch this
     /// before shipping. Fix tracked in issue #38.
-    case networkError(underlying: Error)
+    case networkError(underlying: any Error & Sendable)
     /// The GitHub API returned a non-200 HTTP status code (e.g. 403 Forbidden,
     /// 429 Too Many Requests, 500 Internal Server Error).
     case httpError(statusCode: Int)
     /// The HTTP response body could not be decoded as the expected releases array.
-    case decodingError(underlying: Error)
+    case decodingError(underlying: any Error & Sendable)
 }
 
 // MARK: - UpdateCheckError
