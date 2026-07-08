@@ -62,7 +62,8 @@ struct UpdateCheckerCheckForUpdateTests {
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
-              checkError == .missingVersionKey else {
+              case .missingVersionKey = checkError
+        else {
             Issue.record("Expected .failed(.missingVersionKey), got \(result)")
             return
         }
@@ -76,23 +77,103 @@ struct UpdateCheckerCheckForUpdateTests {
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
-              checkError == .missingVersionKey else {
+              case .missingVersionKey = checkError
+        else {
             Issue.record("Expected .failed(.missingVersionKey), got \(result)")
             return
         }
     }
 
-    @Test func failedFetchResult_emptyVersion_returnsNoReleasesFound() {
+    /// Verifies that a `.failed` fetch result propagates as
+    /// `.failed(.fetchFailed(.networkError))` regardless of `currentVersion`.
+    ///
+    /// ## ⚠️ currentVersion: "" is intentional — ordering dependency
+    ///
+    /// A reviewer may expect `currentVersion: ""` to produce
+    /// `.failed(.missingVersionKey)` instead. It does not, because
+    /// `UpdateChecker.evaluate` checks `.failed` fetch results *before* the
+    /// empty-version guard: a failed fetch is always a fetch failure regardless
+    /// of what `currentVersion` contains. `emptyCurrentVersion_returnsMissingVersionKey`
+    /// above covers the `.fetched(nil)` + empty version path. The two tests
+    /// are complementary, not contradictory.
+    @Test func failedFetchResult_returnsNetworkError() {
+        let simulatedError = URLError(.notConnectedToInternet)
         let result = UpdateChecker.evaluate(
-            fetchResult: .failed,
+            fetchResult: .failed(.networkError(underlying: simulatedError)),
             currentVersion: ""
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
-              checkError == .noReleasesFound else {
-            Issue.record("Expected .failed(.noReleasesFound), got \(result)")
+              case .fetchFailed(let reason) = checkError,
+              case .networkError = reason
+        else {
+            Issue.record("Expected .failed(.fetchFailed(.networkError)), got \(result)")
             return
         }
+    }
+
+    @Test func failedFetchResult_returnsHttpError() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .failed(.httpError(statusCode: 429)),
+            currentVersion: ""
+        )
+        guard case .failed(let error) = result,
+              let checkError = error as? UpdateCheckError,
+              case .fetchFailed(let reason) = checkError,
+              case .httpError(let statusCode) = reason
+        else {
+            Issue.record("Expected .failed(.fetchFailed(.httpError)), got \(result)")
+            return
+        }
+        #expect(statusCode == 429)
+    }
+
+    @Test func failedFetchResult_returnsDecodingError() {
+        let simulatedError = DecodingError.dataCorrupted(
+            .init(codingPath: [], debugDescription: "fixture decode failure")
+        )
+        let result = UpdateChecker.evaluate(
+            fetchResult: .failed(.decodingError(underlying: simulatedError)),
+            currentVersion: ""
+        )
+        guard case .failed(let error) = result,
+              let checkError = error as? UpdateCheckError,
+              case .fetchFailed(let reason) = checkError,
+              case .decodingError = reason
+        else {
+            Issue.record("Expected .failed(.fetchFailed(.decodingError)), got \(result)")
+            return
+        }
+    }
+
+    /// Pins the interim buildRequest-nil fallback behaviour: a malformed repo
+    /// string causes `buildRequest` to return nil, which `fetchAndDecodeReleases`
+    /// maps to `.failure(.networkError(underlying: URLError(.badURL)))` in
+    /// release builds. This test exercises that exact `ReleaseFetchError` value
+    /// through `UpdateChecker.evaluate` so that when issue #38 changes the
+    /// return to `.configurationError`, this test fails loudly rather than
+    /// letting the misclassification silently persist.
+    ///
+    /// The test operates at the `evaluate` layer (not the `URLSession` layer)
+    /// because `GitHubReleaseProvider.fetchAndDecodeReleases` constructs a live
+    /// `URLSession` and cannot be injected; the evaluate path is the correct
+    /// seam to pin.
+    @Test func buildRequestNilFallback_networkError_badURL_roundTripsCorrectly() {
+        let badURLError = URLError(.badURL)
+        let result = UpdateChecker.evaluate(
+            fetchResult: .failed(.networkError(underlying: badURLError)),
+            currentVersion: "1.0.0"
+        )
+        guard case .failed(let error) = result,
+              let checkError = error as? UpdateCheckError,
+              case .fetchFailed(let reason) = checkError,
+              case .networkError(let underlying) = reason,
+              let urlError = underlying as? URLError
+        else {
+            Issue.record("Expected .failed(.fetchFailed(.networkError(URLError(.badURL)))), got \(result)")
+            return
+        }
+        #expect(urlError.code == .badURL)
     }
 
     // MARK: - Malformed semver
@@ -193,7 +274,6 @@ private struct FixtureRelease: Decodable {
     let tagName: String
     let prerelease: Bool
     let assets: [ReleaseAsset]
-
     enum CodingKeys: String, CodingKey {
         case tagName = "tag_name"
         case prerelease

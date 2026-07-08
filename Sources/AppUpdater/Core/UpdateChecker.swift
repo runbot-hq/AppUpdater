@@ -136,7 +136,9 @@ public enum UpdateChecker {
     ///
     /// ## Return values
     ///
-    /// - `.failed(.noReleasesFound)` — `fetchResult` is `.failed`.
+    /// - `.failed(.fetchFailed(fetchError))` — `fetchResult` is `.failed`;
+    ///   `fetchError` is a `ReleaseFetchError` describing the root cause
+    ///   (`.networkError`, `.httpError(statusCode:)`, or `.decodingError`).
     /// - `.failed(.missingVersionKey)` — `currentVersion` is empty (and fetch
     ///   did not fail).
     /// - `.upToDate` — `fetchResult` is `.fetched(nil)` (no channel match) or
@@ -154,8 +156,8 @@ public enum UpdateChecker {
         currentVersion: String
     ) -> UpdateCheckResult {
         switch fetchResult {
-        case .failed:
-            return .failed(UpdateCheckError.noReleasesFound)
+        case .failed(let fetchError):
+            return .failed(UpdateCheckError.fetchFailed(fetchError))
         case .fetched(let release):
             guard !currentVersion.isEmpty else {
                 return .failed(UpdateCheckError.missingVersionKey)
@@ -195,7 +197,8 @@ public enum UpdateChecker {
     /// - `.upToDate` — latest eligible release is not newer than `currentVersion`,
     ///   **or** no release matched the channel (stable user, beta-only repo).
     /// - `.updateAvailable` — a newer eligible release was found.
-    /// - `.failed(.noReleasesFound)` — fetch, HTTP, or decode failure.
+    /// - `.failed(.fetchFailed(fetchError))` — fetch, HTTP, or decode failure;
+    ///   inspect `fetchError` for the specific `ReleaseFetchError` case.
     /// - `.failed(.missingVersionKey)` — `currentVersion` is empty and fetch
     ///   did not fail.
     public static func checkForUpdate(

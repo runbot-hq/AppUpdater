@@ -13,14 +13,17 @@
 ///   `.upToDate`.
 /// - `.fetched(release)` — a matching release was found. Caller performs
 ///   version comparison.
-/// - `.failed` — network error, non-200 HTTP response, or JSON decode
-///   failure. Maps to `.failed(.noReleasesFound)`.
+/// - `.failed(ReleaseFetchError)` — network error, non-200 HTTP response,
+///   or JSON decode failure. The associated `ReleaseFetchError` identifies
+///   the specific failure mode so callers can present actionable messages.
+///   Maps to `.failed(.fetchFailed(error))`.
 public enum ReleaseFetchResult: Sendable {
     /// Fetch and decode succeeded. `release` is `nil` when no release matched
     /// the channel filter.
     case fetched(AvailableRelease?)
-    /// Fetch, HTTP, or decode failure.
-    case failed
+    /// Fetch, HTTP, or decode failure. The associated value identifies the
+    /// specific failure mode — see `ReleaseFetchError` for the full case list.
+    case failed(ReleaseFetchError)
 }
 
 // MARK: - ReleaseProvider
@@ -43,8 +46,9 @@ public protocol ReleaseProvider: Sendable {
     /// Fetches the latest release for `repo` matching the given channel.
     ///
     /// Returns `.fetched(release)` on success, `.fetched(nil)` when no
-    /// release matched the channel filter, and `.failed` on any network,
-    /// HTTP, or decode error.
+    /// release matched the channel filter, and `.failed(error)` on any
+    /// network, HTTP, or decode error — where `error` is a `ReleaseFetchError`
+    /// identifying the specific failure mode.
     ///
     /// Failures are best-effort and must never surface error UI directly —
     /// mapping to `UpdateCheckResult` is the caller's responsibility.

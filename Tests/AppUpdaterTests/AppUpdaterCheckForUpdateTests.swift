@@ -38,19 +38,22 @@ struct AppUpdaterCheckForUpdateTests {
         AvailableRelease(tagName: tag, assets: [], checksumURL: nil)
     }
 
-    // MARK: - 1. Provider returns .failed → .failed(.noReleasesFound)
+    // MARK: - 1. Provider returns .failed → .failed(.fetchFailed(.networkError))
 
-    @Test func providerReturnsNil_failedNoReleasesFound() async throws {
-        let domain = "test.check.nil.\(UUID().uuidString)"
-        let provider = MockReleaseProvider(fetchResultToReturn: .failed)
+    @Test func providerReturnsFailed_fetchFailedNetworkError() async throws {
+        let domain = "test.check.failed.\(UUID().uuidString)"
+        let simulatedError = URLError(.notConnectedToInternet)
+        let provider = MockReleaseProvider(
+            fetchResultToReturn: .failed(.networkError(underlying: simulatedError))
+        )
         let updater = makeUpdater(domain: domain, provider: provider)
-
         let result = await updater.checkForUpdate(betaChannel: false)
-
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
-              checkError == .noReleasesFound else {
-            Issue.record("Expected .failed(.noReleasesFound), got \(result)")
+              case .fetchFailed(let reason) = checkError,
+              case .networkError = reason
+        else {
+            Issue.record("Expected .failed(.fetchFailed(.networkError)), got \(result)")
             return
         }
     }
@@ -61,9 +64,7 @@ struct AppUpdaterCheckForUpdateTests {
         let domain = "test.check.fetchednil.\(UUID().uuidString)"
         let provider = MockReleaseProvider(fetchResultToReturn: .fetched(nil))
         let updater = makeUpdater(domain: domain, provider: provider)
-
         let result = await updater.checkForUpdate(betaChannel: false)
-
         guard case .upToDate = result else {
             Issue.record("Expected .upToDate for no-channel-match, got \(result)")
             return
@@ -76,9 +77,7 @@ struct AppUpdaterCheckForUpdateTests {
         let domain = "test.check.older.\(UUID().uuidString)"
         let provider = MockReleaseProvider(releaseToReturn: release(tag: olderTag))
         let updater = makeUpdater(domain: domain, provider: provider)
-
         let result = await updater.checkForUpdate(betaChannel: false)
-
         guard case .upToDate = result else {
             Issue.record("Expected .upToDate, got \(result)")
             return
@@ -91,9 +90,7 @@ struct AppUpdaterCheckForUpdateTests {
         let domain = "test.check.newer.\(UUID().uuidString)"
         let provider = MockReleaseProvider(releaseToReturn: release(tag: newerTag))
         let updater = makeUpdater(domain: domain, provider: provider)
-
         let result = await updater.checkForUpdate(betaChannel: false)
-
         guard case .updateAvailable(let r) = result else {
             Issue.record("Expected .updateAvailable, got \(result)")
             return
@@ -107,9 +104,7 @@ struct AppUpdaterCheckForUpdateTests {
         let domain = "test.check.beta.false.\(UUID().uuidString)"
         let provider = MockReleaseProvider(releaseToReturn: nil)
         let updater = makeUpdater(domain: domain, provider: provider)
-
         _ = await updater.checkForUpdate(betaChannel: false)
-
         let captured = await provider.capturedBetaChannel
         #expect(captured == false)
     }
@@ -120,9 +115,7 @@ struct AppUpdaterCheckForUpdateTests {
         let domain = "test.check.beta.true.\(UUID().uuidString)"
         let provider = MockReleaseProvider(releaseToReturn: nil)
         let updater = makeUpdater(domain: domain, provider: provider)
-
         _ = await updater.checkForUpdate(betaChannel: true)
-
         let captured = await provider.capturedBetaChannel
         #expect(captured == true)
     }
@@ -133,9 +126,7 @@ struct AppUpdaterCheckForUpdateTests {
         let domain = "test.check.callcount.\(UUID().uuidString)"
         let provider = MockReleaseProvider(releaseToReturn: nil)
         let updater = makeUpdater(domain: domain, provider: provider)
-
         _ = await updater.checkForUpdate(betaChannel: false)
-
         let count = await provider.callCount
         #expect(count == 1)
     }

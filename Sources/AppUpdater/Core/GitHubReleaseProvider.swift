@@ -61,8 +61,9 @@ public struct GitHubReleaseProvider: ReleaseProvider {
     /// Fetches the latest release for `repo` matching `betaChannel`.
     ///
     /// Returns:
-    /// - `.failed` on network error, non-200 HTTP response, or JSON decode
-    ///   failure.
+    /// - `.failed(ReleaseFetchError)` on network error, non-200 HTTP response,
+    ///   or JSON decode failure — each failure mode is a distinct
+    ///   `ReleaseFetchError` case so callers can present meaningful messages.
     /// - `.fetched(nil)` when the fetch succeeded but no release matched the
     ///   channel filter (e.g. stable user on a beta-only repo).
     /// - `.fetched(release)` when a matching release was found.
@@ -91,29 +92,32 @@ public struct GitHubReleaseProvider: ReleaseProvider {
         betaChannel: Bool,
         assetName: @Sendable (String) -> String
     ) async -> ReleaseFetchResult {
-        guard let releases = await fetchAndDecodeReleases(repo: repo) else {
-            return .failed
+        let fetchResult = await fetchAndDecodeReleases(repo: repo)
+        switch fetchResult {
+        case .failure(let error):
+            return .failed(error)
+        case .success(let releases):
+            guard let latest = latestMatchingRelease(from: releases, betaChannel: betaChannel) else {
+                // Fetch succeeded but no release matched the channel — not a failure.
+                return .fetched(nil)
+            }
+            let checksumAssetName = assetName(latest.tagName) + ".sha256"
+            let checksumAsset = latest.assets.first(where: { $0.name == checksumAssetName })
+            // tagName is passed through verbatim from Release.tagName with no
+            // normalisation (no v-stripping, no lowercasing, no trimming).
+            // AvailableRelease has no init logic that transforms it — it is a
+            // plain memberwise assignment. This is the format-parity invariant
+            // that installAndRelaunch's string-equality revalidation check depends
+            // on: both sides of the != comparison are raw GitHub tag strings from
+            // the same field, via the same path. Do NOT add normalisation here or
+            // in AvailableRelease.init without updating the revalidation check and
+            // the decode tests accordingly.
+            return .fetched(AvailableRelease(
+                tagName: latest.tagName,
+                assets: latest.assets,
+                checksumURL: checksumAsset?.browserDownloadURL
+            ))
         }
-        guard let latest = latestMatchingRelease(from: releases, betaChannel: betaChannel) else {
-            // Fetch succeeded but no release matched the channel — not a failure.
-            return .fetched(nil)
-        }
-        let checksumAssetName = assetName(latest.tagName) + ".sha256"
-        let checksumAsset = latest.assets.first(where: { $0.name == checksumAssetName })
-        // tagName is passed through verbatim from Release.tagName with no
-        // normalisation (no v-stripping, no lowercasing, no trimming).
-        // AvailableRelease has no init logic that transforms it — it is a
-        // plain memberwise assignment. This is the format-parity invariant
-        // that installAndRelaunch's string-equality revalidation check depends
-        // on: both sides of the != comparison are raw GitHub tag strings from
-        // the same field, via the same path. Do NOT add normalisation here or
-        // in AvailableRelease.init without updating the revalidation check and
-        // the decode tests accordingly.
-        return .fetched(AvailableRelease(
-            tagName: latest.tagName,
-            assets: latest.assets,
-            checksumURL: checksumAsset?.browserDownloadURL
-        ))
     }
 
     // MARK: - Private fetch pipeline
@@ -149,9 +153,15 @@ public struct GitHubReleaseProvider: ReleaseProvider {
 
     /// Fetches and decodes the releases list for `repo`.
     ///
-    /// Returns `nil` on any network, HTTP, or JSON-decode failure. An empty
-    /// array means the repository exists but has no published releases.
-    /// This is intentionally separate from channel filtering — a `nil` return
+    /// Returns a `Result` rather than an optional so each failure mode is
+    /// captured as a distinct `ReleaseFetchError` case:
+    /// - `.networkError` — the `URLSession` threw (offline, DNS, timeout).
+    /// - `.httpError(statusCode:)` — the server responded with a non-200 status.
+    /// - `.decodingError` — the response body failed JSON decoding.
+    ///
+    /// A `.success([])` means the repository exists but has no published releases.
+    ///
+    /// This is intentionally separate from channel filtering — a `.failure`
     /// here means "we could not determine the release list", whereas an empty
     /// filtered result means "releases exist but none match the channel".
     ///
@@ -179,8 +189,24 @@ public struct GitHubReleaseProvider: ReleaseProvider {
     ///   silently enable both.
     ///
     /// The per-call session is intentional. Do not "optimise" it.
-    private func fetchAndDecodeReleases(repo: String) async -> [Release]? {
-        guard let request = buildRequest(repo: repo, perPage: 100) else { return nil }
+    private func fetchAndDecodeReleases(repo: String) async -> Result<[Release], ReleaseFetchError> {
+        guard let request = buildRequest(repo: repo, perPage: 100) else {
+            // Programmer/configuration error — the repo string is malformed and
+            // URL construction failed. This is not a runtime network condition.
+            //
+            // ❌ A reviewer may suggest adding a dedicated .configurationError case
+            // to ReleaseFetchError here. Do not do it in this file without a
+            // corresponding change to the ReleaseFetchError enum — adding a new
+            // public case breaks all callers' exhaustive switches and is a
+            // public API surface change out of scope for this step.
+            // Tracked in issue #38.
+            //
+            // assertionFailure fires in debug/test builds so a bad repo string
+            // is caught immediately during development. In release builds it is
+            // a no-op and .networkError is returned as an interim fallback.
+            assertionFailure("AppUpdater: buildRequest returned nil — check repo string: \(repo)")
+            return .failure(.networkError(underlying: URLError(.badURL)))
+        }
 
         let sessionConfig = URLSessionConfiguration.ephemeral
         sessionConfig.timeoutIntervalForRequest = 30
@@ -188,7 +214,13 @@ public struct GitHubReleaseProvider: ReleaseProvider {
         let session = URLSession(configuration: sessionConfig)
         defer { session.finishTasksAndInvalidate() }
 
-        guard let (data, response) = try? await session.data(for: request) else { return nil }
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            return .failure(.networkError(underlying: error))
+        }
 
         if let httpResponse = response as? HTTPURLResponse,
            httpResponse.statusCode != 200 {
@@ -196,10 +228,15 @@ public struct GitHubReleaseProvider: ReleaseProvider {
             appUpdaterLogger.debug(
                 "releases API returned \(httpResponse.statusCode, privacy: .public) for \(repo, privacy: .public): \(body, privacy: .public)"
             )
-            return nil
+            return .failure(.httpError(statusCode: httpResponse.statusCode))
         }
 
-        return try? JSONDecoder().decode([Release].self, from: data)
+        do {
+            let releases = try JSONDecoder().decode([Release].self, from: data)
+            return .success(releases)
+        } catch {
+            return .failure(.decodingError(underlying: error))
+        }
     }
 
     /// Sorts `releases` by semver (newest first) and returns the first entry
