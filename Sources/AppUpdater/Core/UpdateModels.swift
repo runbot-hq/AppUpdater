@@ -44,28 +44,52 @@ public enum UpdateCheckResult: Sendable {
     case failed(Error)
 }
 
+// MARK: - ReleaseFetchError
+
+/// The specific reason a release fetch failed.
+///
+/// Carried by `ReleaseFetchResult.failed` and `UpdateCheckError.fetchFailed`
+/// to let callers distinguish connectivity problems from API-level rejections
+/// and data errors.
+public enum ReleaseFetchError: Error, Sendable {
+    /// The network request itself could not be completed (device offline, DNS
+    /// failure, timeout, etc.). The underlying `URLSession` error is attached.
+    case networkError(underlying: Error)
+    /// The GitHub API returned a non-200 HTTP status code (e.g. 403 Forbidden,
+    /// 429 Too Many Requests, 500 Internal Server Error).
+    case httpError(statusCode: Int)
+    /// The HTTP response body could not be decoded as the expected releases array.
+    case decodingError(underlying: Error)
+}
+
 // MARK: - UpdateCheckError
 
 /// Errors produced by `UpdateChecker` and `AppUpdater.checkForUpdate`.
 public enum UpdateCheckError: Error, Sendable {
     /// The `currentVersion` string supplied to the checker was empty.
     case missingVersionKey
-    /// The releases API request failed, the HTTP response was non-200, or
-    /// the response body could not be decoded.
+    /// The release fetch failed with a structured error describing the root cause.
     ///
-    /// This does **not** mean "no channel match". Since PR #22 introduced
-    /// `ReleaseFetchResult`, the two previously conflated nil cases are now
-    /// structurally distinct:
-    /// - `.failed` (network/HTTP/decode error) → `UpdateCheckError.noReleasesFound`
-    /// - `.fetched(nil)` (fetch succeeded, no release matched the channel) → `.upToDate`
+    /// Use the associated `ReleaseFetchError` to present a meaningful message:
+    /// - `.networkError` → the device is likely offline or the request timed out.
+    /// - `.httpError(429)` / `.httpError(403)` → GitHub rate-limit or auth failure.
+    /// - `.httpError(let code)` → other API-level failure.
+    /// - `.decodingError` → unexpected response shape; worth logging for diagnosis.
     ///
-    /// If you are reading this comment because you see `.noReleasesFound` and
-    /// suspect a channel-match miss: check `GitHubReleaseProvider.latestMatchingRelease`
-    /// and the `betaChannel` flag instead — that path now returns `.fetched(nil)`,
-    /// not `.failed`.
+    /// Note: this replaces the previous `.noReleasesFound` case, which conflated
+    /// all three failure modes. See issue #31 for background.
+    case fetchFailed(ReleaseFetchError)
+
+    /// - Note: Deprecated. Use `.fetchFailed(_:)` instead.
     ///
-    /// Known limitation: network errors, rate-limits (HTTP 429/403), and decode
-    /// failures all map to this same case. The UI cannot distinguish "offline"
-    /// from a hard API failure. Tracked in issue #1878.
-    case noReleasesFound
+    /// This alias is retained for one release cycle to avoid a hard breaking
+    /// change for callers that pattern-match on `.noReleasesFound`. It will be
+    /// removed in a future minor version.
+    @available(*, deprecated, renamed: "fetchFailed")
+    public static var noReleasesFound: UpdateCheckError {
+        // Surfaced as a network error since the old case was most commonly
+        // triggered by connectivity problems. Callers should migrate to
+        // matching on `.fetchFailed` with specific sub-cases.
+        .fetchFailed(.httpError(statusCode: 0))
+    }
 }
