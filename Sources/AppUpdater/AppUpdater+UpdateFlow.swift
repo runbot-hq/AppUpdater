@@ -12,8 +12,11 @@ extension AppUpdater {
     /// Runs a full update check and handles the result.
     ///
     /// On `.updateAvailable` the release is downloaded/cached via `handle`.
-    /// `.upToDate` and `.failed` are no-ops here — the background scheduler
-    /// owns the stale-row-clearing policy.
+    /// `.upToDate` is a no-op here — the background scheduler owns the
+    /// stale-row-clearing policy.
+    /// `.failed` logs a granular message per `ReleaseFetchError` sub-case so
+    /// triage does not require a proxy or network capture to distinguish
+    /// offline failures from API rejections.
     public func checkAndHandle(state: any UpdateStateProviding) async {
         let beta = betaChannelProvider()
         switch await checkForUpdate(betaChannel: beta) {
@@ -23,7 +26,25 @@ extension AppUpdater {
         case .upToDate:
             appUpdaterLogger.debug("no update available (beta=\(beta, privacy: .public))")
         case .failed(let error):
-            appUpdaterLogger.debug("update check failed: \(String(describing: error), privacy: .public) (beta=\(beta, privacy: .public))")
+            switch error as? UpdateCheckError {
+            case .fetchFailed(let reason):
+                switch reason {
+                case .networkError(let underlying):
+                    // Device is likely offline, DNS failed, or the request timed out.
+                    appUpdaterLogger.debug("update check failed: network error — \(underlying.localizedDescription, privacy: .public) (beta=\(beta, privacy: .public))")
+                case .httpError(let statusCode):
+                    // GitHub API returned a non-200 status (e.g. 403 Forbidden, 429 Too Many Requests).
+                    appUpdaterLogger.debug("update check failed: HTTP \(statusCode, privacy: .public) from GitHub API (beta=\(beta, privacy: .public))")
+                case .decodingError(let underlying):
+                    // Response body did not match the expected releases schema.
+                    appUpdaterLogger.debug("update check failed: response decode error — \(underlying.localizedDescription, privacy: .public) (beta=\(beta, privacy: .public))")
+                }
+            case .missingVersionKey:
+                appUpdaterLogger.debug("update check failed: currentVersion is empty — check AppUpdater init configuration (beta=\(beta, privacy: .public))")
+            case nil:
+                // Unexpected error type — fall back to generic description.
+                appUpdaterLogger.debug("update check failed: \(String(describing: error), privacy: .public) (beta=\(beta, privacy: .public))")
+            }
         }
     }
 
@@ -55,7 +76,7 @@ extension AppUpdater {
     /// 3. Otherwise advances to `.available` and starts a background download.
     public func handle(_ release: AvailableRelease, state: any UpdateStateProviding) async {
 
-        // ── 1. Already cached? ──────────────────────────────────────────────
+        // ── 1. Already cached? ──────────────────────────────────────────────────────────────────────
         // withZipURL snapshots fixedZipURL once. The same URL is used for the
         // existence check here AND passed into downloadUpdate as `destination`,
         // so both operations are guaranteed to target the exact same path.
@@ -139,7 +160,7 @@ extension AppUpdater {
                 return
             }
 
-            // ── 2. Asset or checksum sidecar absent? ───────────────────────────────
+            // ── 2. Asset or checksum sidecar absent? ─────────────────────────────────────────────────────
             let wantedAsset = assetName(release.tagName)
             guard let asset = release.assets.first(where: { $0.name == wantedAsset }) else {
                 appUpdaterLogger.warning("release \(release.tagName, privacy: .public) has no asset named \(wantedAsset, privacy: .public) — skipping download")
@@ -150,7 +171,7 @@ extension AppUpdater {
                 return
             }
 
-            // ── 3. Advance to .available and start download ────────────────────────
+            // ── 3. Advance to .available and start download ──────────────────────────────────────────────
             state.apply(.available(version: release.tagName))
 
             let downloadURL = asset.browserDownloadURL
