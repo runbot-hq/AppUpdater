@@ -84,6 +84,18 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
+    /// Verifies that a `.failed` fetch result propagates as
+    /// `.failed(.fetchFailed(.networkError))` regardless of `currentVersion`.
+    ///
+    /// ## ⚠️ currentVersion: "" is intentional — ordering dependency
+    ///
+    /// A reviewer may expect `currentVersion: ""` to produce
+    /// `.failed(.missingVersionKey)` instead. It does not, because
+    /// `UpdateChecker.evaluate` checks `.failed` fetch results *before* the
+    /// empty-version guard: a failed fetch is always a fetch failure regardless
+    /// of what `currentVersion` contains. `emptyCurrentVersion_returnsMissingVersionKey`
+    /// above covers the `.fetched(nil)` + empty version path. The two tests
+    /// are complementary, not contradictory.
     @Test func failedFetchResult_returnsNetworkError() {
         let simulatedError = URLError(.notConnectedToInternet)
         let result = UpdateChecker.evaluate(

@@ -70,11 +70,36 @@ public enum ReleaseFetchError: Error, Sendable {
     /// the "Known misclassification" section in the `ReleaseFetchError` doc
     /// comment above. Use the `assertionFailure` in debug builds to catch this
     /// before shipping. Fix tracked in issue #38.
+    ///
+    /// ❌ DO NOT revert the associated value type from `any Error & Sendable`
+    /// back to bare `Error`.
+    ///
+    /// This has been raised twice across review cycles, in opposite directions.
+    /// The correct spelling is `any Error & Sendable`. Here is why:
+    ///
+    /// `ReleaseFetchError` is itself `Sendable`. A `Sendable` enum with a
+    /// non-`Sendable` associated value is a data race — the enum can cross
+    /// actor boundaries while the associated error cannot. Bare `Error` makes
+    /// the `Sendable` conformance on the *enum* unchecked: Swift trusts it
+    /// rather than enforcing it, so a caller constructing `.networkError` with
+    /// a non-`Sendable` custom error silently violates strict concurrency
+    /// without a compile-time warning. `any Error & Sendable` makes the
+    /// conformance sound at the type level.
+    ///
+    /// All construction sites in this codebase (`URLSession` throws,
+    /// `JSONDecoder` throws, `URLError(.badURL)` fallback) already produce
+    /// `Sendable`-safe errors, so no call site changes are required.
+    /// The `& Sendable` constraint is not restrictive in practice — it
+    /// prevents a class of future bugs rather than limiting current callers.
     case networkError(underlying: any Error & Sendable)
     /// The GitHub API returned a non-200 HTTP status code (e.g. 403 Forbidden,
     /// 429 Too Many Requests, 500 Internal Server Error).
     case httpError(statusCode: Int)
     /// The HTTP response body could not be decoded as the expected releases array.
+    ///
+    /// ❌ DO NOT revert the associated value type from `any Error & Sendable`
+    /// back to bare `Error`. See the `networkError` case doc comment above for
+    /// the full rationale — the same reasoning applies here.
     case decodingError(underlying: any Error & Sendable)
 }
 
