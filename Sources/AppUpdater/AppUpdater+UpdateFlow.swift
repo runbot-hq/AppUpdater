@@ -63,9 +63,11 @@ extension AppUpdater {
 
     /// Runs a channel-aware update check via the injected `ReleaseProvider`.
     ///
-    /// Passes the raw `ReleaseFetchResult` directly into `UpdateChecker.evaluate`
-    /// so the mapping from fetch outcome to `UpdateCheckResult` is owned entirely
-    /// by `evaluate` with no intermediate deconstruction.
+    /// Passes `betaChannel` into both the fetch (for channel filtering) and
+    /// `UpdateChecker.evaluate` (for channel-downgrade detection). This ensures
+    /// that a user who opts out of beta while running a pre-release that is
+    /// semver-ahead of stable is offered the stable release as a downgrade,
+    /// rather than being silently stranded.
     ///
     /// Intentionally `internal` — `checkAndHandle` is the designed public
     /// entry point for host apps.
@@ -75,7 +77,7 @@ extension AppUpdater {
             betaChannel: betaChannel,
             assetName: assetName
         )
-        return UpdateChecker.evaluate(fetchResult: fetchResult, currentVersion: currentVersion)
+        return UpdateChecker.evaluate(fetchResult: fetchResult, currentVersion: currentVersion, betaChannel: betaChannel)
     }
 
     // MARK: - Handle
@@ -89,7 +91,7 @@ extension AppUpdater {
     /// 3. Otherwise advances to `.available` and starts a background download.
     public func handle(_ release: AvailableRelease, state: any UpdateStateProviding) async {
 
-        // ── 1. Already cached? ──────────────────────────────────────────────────────────────────────
+        // ── 1. Already cached? ───────────────────────────────────────────────────────────────────────────────────────
         // withZipURL snapshots fixedZipURL once. The same URL is used for the
         // existence check here AND passed into downloadUpdate as `destination`,
         // so both operations are guaranteed to target the exact same path.
@@ -173,7 +175,7 @@ extension AppUpdater {
                 return
             }
 
-            // ── 2. Asset or checksum sidecar absent? ─────────────────────────────────────────────────────
+            // ── 2. Asset or checksum sidecar absent? ───────────────────────────────────────────────────────────────────────
             let wantedAsset = assetName(release.tagName)
             guard let asset = release.assets.first(where: { $0.name == wantedAsset }) else {
                 appUpdaterLogger.warning("release \(release.tagName, privacy: .public) has no asset named \(wantedAsset, privacy: .public) — skipping download")
@@ -184,7 +186,7 @@ extension AppUpdater {
                 return
             }
 
-            // ── 3. Advance to .available and start download ──────────────────────────────────────────────
+            // ── 3. Advance to .available and start download ──────────────────────────────────────────────────────────
             state.apply(.available(version: release.tagName))
 
             let downloadURL = asset.browserDownloadURL
