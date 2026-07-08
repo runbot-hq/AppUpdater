@@ -134,6 +134,36 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
+    /// Pins the interim buildRequest-nil fallback behaviour: a malformed repo
+    /// string causes `buildRequest` to return nil, which `fetchAndDecodeReleases`
+    /// maps to `.failure(.networkError(underlying: URLError(.badURL)))` in
+    /// release builds. This test exercises that exact `ReleaseFetchError` value
+    /// through `UpdateChecker.evaluate` so that when issue #38 changes the
+    /// return to `.configurationError`, this test fails loudly rather than
+    /// letting the misclassification silently persist.
+    ///
+    /// The test operates at the `evaluate` layer (not the `URLSession` layer)
+    /// because `GitHubReleaseProvider.fetchAndDecodeReleases` constructs a live
+    /// `URLSession` and cannot be injected; the evaluate path is the correct
+    /// seam to pin.
+    @Test func buildRequestNilFallback_networkError_badURL_roundTripsCorrectly() {
+        let badURLError = URLError(.badURL)
+        let result = UpdateChecker.evaluate(
+            fetchResult: .failed(.networkError(underlying: badURLError)),
+            currentVersion: "1.0.0"
+        )
+        guard case .failed(let error) = result,
+              let checkError = error as? UpdateCheckError,
+              case .fetchFailed(let reason) = checkError,
+              case .networkError(let underlying) = reason,
+              let urlError = underlying as? URLError
+        else {
+            Issue.record("Expected .failed(.fetchFailed(.networkError(URLError(.badURL)))), got \(result)")
+            return
+        }
+        #expect(urlError.code == .badURL)
+    }
+
     // MARK: - Malformed semver
 
     /// A garbage `currentVersion` string with a nil-fetched release must not
