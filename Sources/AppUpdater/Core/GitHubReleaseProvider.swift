@@ -193,11 +193,17 @@ public struct GitHubReleaseProvider: ReleaseProvider {
         guard let request = buildRequest(repo: repo, perPage: 100) else {
             // Programmer/configuration error — the repo string is malformed and
             // URL construction failed. This is not a runtime network condition.
-            // assertionFailure fires in debug builds so a bad repo string passed
-            // at init is caught immediately during development and testing.
-            // In release builds assertionFailure is a no-op; .networkError is
-            // returned as an interim fallback until a dedicated .configurationError
-            // case is added to ReleaseFetchError (see issue #31, follow-up steps).
+            //
+            // ❌ A reviewer may suggest adding a dedicated .configurationError case
+            // to ReleaseFetchError here. Do not do it in this file without a
+            // corresponding change to the ReleaseFetchError enum — adding a new
+            // public case breaks all callers' exhaustive switches and is a
+            // public API surface change out of scope for this step.
+            // Tracked in issue #38.
+            //
+            // assertionFailure fires in debug/test builds so a bad repo string
+            // is caught immediately during development. In release builds it is
+            // a no-op and .networkError is returned as an interim fallback.
             assertionFailure("AppUpdater: buildRequest returned nil — check repo string: \(repo)")
             return .failure(.networkError(underlying: URLError(.badURL)))
         }
