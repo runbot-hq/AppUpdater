@@ -62,7 +62,7 @@ struct UpdateCheckerCheckForUpdateTests {
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
-              checkError == .missingVersionKey
+              case .missingVersionKey = checkError
         else {
             Issue.record("Expected .failed(.missingVersionKey), got \(result)")
             return
@@ -77,7 +77,7 @@ struct UpdateCheckerCheckForUpdateTests {
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
-              checkError == .missingVersionKey
+              case .missingVersionKey = checkError
         else {
             Issue.record("Expected .failed(.missingVersionKey), got \(result)")
             return
