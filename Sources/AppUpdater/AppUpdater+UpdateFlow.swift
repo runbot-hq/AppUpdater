@@ -41,9 +41,6 @@ extension AppUpdater {
                 }
             case .missingVersionKey:
                 appUpdaterLogger.debug("update check failed: currentVersion is empty — check AppUpdater init configuration (beta=\(beta, privacy: .public))")
-            case .noReleasesFound:
-                // Deprecated case retained for source compatibility. Migrate to .fetchFailed.
-                appUpdaterLogger.debug("update check failed: deprecated .noReleasesFound produced — migrate callers to .fetchFailed (beta=\(beta, privacy: .public))")
             case nil:
                 // Unexpected error type — fall back to generic description.
                 appUpdaterLogger.debug("update check failed: \(String(describing: error), privacy: .public) (beta=\(beta, privacy: .public))")
@@ -79,7 +76,7 @@ extension AppUpdater {
     /// 3. Otherwise advances to `.available` and starts a background download.
     public func handle(_ release: AvailableRelease, state: any UpdateStateProviding) async {
 
-        // ── 1. Already cached? ─────────────────────────────────────────────────────────────────────────────────────────
+        // ── 1. Already cached? ──────────────────────────────────────────────────────────────────────
         // withZipURL snapshots fixedZipURL once. The same URL is used for the
         // existence check here AND passed into downloadUpdate as `destination`,
         // so both operations are guaranteed to target the exact same path.
@@ -163,7 +160,7 @@ extension AppUpdater {
                 return
             }
 
-            // ── 2. Asset or checksum sidecar absent? ───────────────────────────────────────────────────────────────────────────
+            // ── 2. Asset or checksum sidecar absent? ─────────────────────────────────────────────────────
             let wantedAsset = assetName(release.tagName)
             guard let asset = release.assets.first(where: { $0.name == wantedAsset }) else {
                 appUpdaterLogger.warning("release \(release.tagName, privacy: .public) has no asset named \(wantedAsset, privacy: .public) — skipping download")
@@ -174,7 +171,7 @@ extension AppUpdater {
                 return
             }
 
-            // ── 3. Advance to .available and start download ──────────────────────────────────────────────────────────────────
+            // ── 3. Advance to .available and start download ──────────────────────────────────────────────
             state.apply(.available(version: release.tagName))
 
             let downloadURL = asset.browserDownloadURL

@@ -191,8 +191,12 @@ public struct GitHubReleaseProvider: ReleaseProvider {
     /// The per-call session is intentional. Do not "optimise" it.
     private func fetchAndDecodeReleases(repo: String) async -> Result<[Release], ReleaseFetchError> {
         guard let request = buildRequest(repo: repo, perPage: 100) else {
-            // A nil request means URL construction failed — treat as a network-
-            // level error since the caller cannot distinguish it from a DNS failure.
+            // URL construction failed — this is a programmer/configuration error
+            // (malformed repo string), not a runtime network condition. It is
+            // surfaced as .networkError because ReleaseFetchError has no dedicated
+            // .configurationError case in this step (see issue #31 for scope).
+            // TODO: replace with preconditionFailure in debug builds once a
+            // .configurationError case is added in a follow-up step.
             return .failure(.networkError(underlying: URLError(.badURL)))
         }
 

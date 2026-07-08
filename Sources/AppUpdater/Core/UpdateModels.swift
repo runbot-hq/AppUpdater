@@ -51,6 +51,20 @@ public enum UpdateCheckResult: Sendable {
 /// Carried by `ReleaseFetchResult.failed` and `UpdateCheckError.fetchFailed`
 /// to let callers distinguish connectivity problems from API-level rejections
 /// and data errors.
+///
+/// ## Sendable and `underlying: Error` associated values
+///
+/// `ReleaseFetchError` declares `Sendable` conformance, but its
+/// `networkError(underlying:)` and `decodingError(underlying:)` cases carry
+/// existential `Error` values. `Error` is not itself `Sendable`-constrained,
+/// so the compiler trusts this conformance rather than enforcing it. In
+/// practice all errors produced by `URLSession` and `JSONDecoder` are
+/// `Sendable`-safe, but a caller that constructs a `ReleaseFetchError` with a
+/// non-`Sendable` custom error type may violate strict concurrency checking
+/// silently. This is a known Swift stdlib limitation with `Error` existentials
+/// and cannot be resolved without changing the associated value type to
+/// `any Error & Sendable` — a breaking API change deferred to a future major
+/// version.
 public enum ReleaseFetchError: Error, Sendable {
     /// The network request itself could not be completed (device offline, DNS
     /// failure, timeout, etc.). The underlying `URLSession` error is attached.
