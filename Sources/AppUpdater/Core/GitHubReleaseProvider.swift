@@ -191,12 +191,14 @@ public struct GitHubReleaseProvider: ReleaseProvider {
     /// The per-call session is intentional. Do not "optimise" it.
     private func fetchAndDecodeReleases(repo: String) async -> Result<[Release], ReleaseFetchError> {
         guard let request = buildRequest(repo: repo, perPage: 100) else {
-            // URL construction failed — this is a programmer/configuration error
-            // (malformed repo string), not a runtime network condition. It is
-            // surfaced as .networkError because ReleaseFetchError has no dedicated
-            // .configurationError case in this step (see issue #31 for scope).
-            // TODO: replace with preconditionFailure in debug builds once a
-            // .configurationError case is added in a follow-up step.
+            // Programmer/configuration error — the repo string is malformed and
+            // URL construction failed. This is not a runtime network condition.
+            // assertionFailure fires in debug builds so a bad repo string passed
+            // at init is caught immediately during development and testing.
+            // In release builds assertionFailure is a no-op; .networkError is
+            // returned as an interim fallback until a dedicated .configurationError
+            // case is added to ReleaseFetchError (see issue #31, follow-up steps).
+            assertionFailure("AppUpdater: buildRequest returned nil — check repo string: \(repo)")
             return .failure(.networkError(underlying: URLError(.badURL)))
         }
 
