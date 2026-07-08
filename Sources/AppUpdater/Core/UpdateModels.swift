@@ -80,16 +80,13 @@ public enum UpdateCheckError: Error, Sendable {
     /// all three failure modes. See issue #31 for background.
     case fetchFailed(ReleaseFetchError)
 
-    /// - Note: Deprecated. Use `.fetchFailed(_:)` instead.
+    /// Deprecated. Retained as a real enum case (not a static property) so that
+    /// existing callers using `case .noReleasesFound:` in switch/guard statements
+    /// continue to compile with a deprecation warning rather than a hard error.
     ///
-    /// This alias is retained for one release cycle to avoid a hard breaking
-    /// change for callers that pattern-match on `.noReleasesFound`. It will be
-    /// removed in a future minor version.
+    /// Migrate to `case .fetchFailed(let reason):` and branch on `ReleaseFetchError`
+    /// sub-cases for actionable failure handling. This case will be removed in a
+    /// future minor version.
     @available(*, deprecated, renamed: "fetchFailed")
-    public static var noReleasesFound: UpdateCheckError {
-        // Surfaced as a network error since the old case was most commonly
-        // triggered by connectivity problems. Callers should migrate to
-        // matching on `.fetchFailed` with specific sub-cases.
-        .fetchFailed(.httpError(statusCode: 0))
-    }
+    case noReleasesFound
 }
