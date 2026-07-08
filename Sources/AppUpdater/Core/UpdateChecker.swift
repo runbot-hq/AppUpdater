@@ -134,6 +134,21 @@ public enum UpdateChecker {
     /// host app with an empty version string does not mask a real network failure
     /// with a misleading `.missingVersionKey` error.
     ///
+    /// ## Channel downgrade
+    ///
+    /// When `betaChannel` is `false` and `currentVersion` is a pre-release, the
+    /// user has opted out of beta while running a build that is semver-ahead of
+    /// any available stable release. In this case `isNewer` would return `false`
+    /// (the stable release is older) and the user would be silently stranded on
+    /// their beta indefinitely. To handle this, `evaluate` offers the best
+    /// available stable release unconditionally when both conditions hold:
+    ///   1. `betaChannel == false`
+    ///   2. `currentVersion` is a pre-release
+    ///
+    /// The user is then prompted to install the stable release as a downgrade.
+    /// This mirrors the expected product behaviour: opting out of beta means
+    /// "take me back to stable", not "keep me on this beta forever".
+    ///
     /// ## Return values
     ///
     /// - `.failed(.fetchFailed(fetchError))` — `fetchResult` is `.failed`;
@@ -142,8 +157,10 @@ public enum UpdateChecker {
     /// - `.failed(.missingVersionKey)` — `currentVersion` is empty (and fetch
     ///   did not fail).
     /// - `.upToDate` — `fetchResult` is `.fetched(nil)` (no channel match) or
-    ///   the fetched release is not newer than `currentVersion`.
-    /// - `.updateAvailable` — fetched release is newer than `currentVersion`.
+    ///   the fetched release is not newer than `currentVersion` and no channel
+    ///   downgrade applies.
+    /// - `.updateAvailable` — fetched release is newer than `currentVersion`,
+    ///   **or** a channel downgrade from beta to stable is required.
     ///
     /// ## Exhaustion enforcement
     ///
@@ -153,7 +170,8 @@ public enum UpdateChecker {
     /// `@unknown default` arm — either would silently swallow new cases.
     static func evaluate(
         fetchResult: ReleaseFetchResult,
-        currentVersion: String
+        currentVersion: String,
+        betaChannel: Bool
     ) -> UpdateCheckResult {
         switch fetchResult {
         case .failed(let fetchError):
@@ -163,6 +181,15 @@ public enum UpdateChecker {
                 return .failed(UpdateCheckError.missingVersionKey)
             }
             guard let release else { return .upToDate }
+
+            // Channel downgrade: user opted out of beta while running a
+            // pre-release that is semver-ahead of the best available stable.
+            // isNewer would return false (stable is older), stranding the user
+            // on their beta indefinitely. Offer the stable release regardless.
+            if !betaChannel && ParsedVersion(currentVersion).isPrerelease {
+                return .updateAvailable(release: release)
+            }
+
             guard isNewer(release.tagName, than: currentVersion) else { return .upToDate }
             return .updateAvailable(release: release)
         }
@@ -213,6 +240,6 @@ public enum UpdateChecker {
             betaChannel: betaChannel,
             assetName: assetName
         )
-        return evaluate(fetchResult: fetchResult, currentVersion: currentVersion)
+        return evaluate(fetchResult: fetchResult, currentVersion: currentVersion, betaChannel: betaChannel)
     }
 }
