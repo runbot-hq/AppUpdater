@@ -42,10 +42,17 @@ extension AppUpdater {
             case .missingVersionKey:
                 appUpdaterLogger.debug("update check failed: currentVersion is empty — check AppUpdater init configuration (beta=\(beta, privacy: .public))")
             case .noReleasesFound:
-                // Dead guard — no production path emits this case after this PR.
-                // Retained solely because .noReleasesFound is a real (deprecated)
-                // enum case and Swift requires exhaustive switches. Remove this
-                // arm when .noReleasesFound is removed from UpdateCheckError.
+                // ❌ Dead guard — no production path emits .noReleasesFound after this PR.
+                //
+                // A reviewer may suggest removing this arm. Do NOT remove it.
+                //
+                // .noReleasesFound is a real @available(*, deprecated) enum case, not
+                // a static alias. @available deprecation does not exempt a real case
+                // from Swift's exhaustiveness checker — every switch on UpdateCheckError
+                // must cover it or the compiler emits 'switch must be exhaustive'.
+                // Removing this arm was attempted during this PR and caused exactly
+                // that compile error. Remove only when .noReleasesFound is deleted
+                // from the UpdateCheckError enum itself.
                 appUpdaterLogger.debug("update check failed: deprecated .noReleasesFound — migrate callers to .fetchFailed (beta=\(beta, privacy: .public))")
             case nil:
                 // Unexpected error type — fall back to generic description.
