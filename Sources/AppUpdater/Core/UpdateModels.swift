@@ -101,6 +101,11 @@ public enum UpdateCheckError: Error, Sendable {
     /// Migrate to `case .fetchFailed(let reason):` and branch on `ReleaseFetchError`
     /// sub-cases for actionable failure handling. This case will be removed in a
     /// future minor version.
-    @available(*, deprecated, renamed: "fetchFailed")
+    ///
+    /// Note: `message:` is used here instead of `renamed:` because `fetchFailed`
+    /// requires an associated `ReleaseFetchError` value — Xcode's Fix-It cannot
+    /// supply it automatically, so `renamed:` would generate a Fix-It that
+    /// produces a compile error on apply.
+    @available(*, deprecated, message: "Use fetchFailed(_:) and branch on ReleaseFetchError sub-cases. See UpdateCheckError docs.")
     case noReleasesFound
 }
