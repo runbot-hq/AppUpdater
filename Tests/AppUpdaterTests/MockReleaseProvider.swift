@@ -16,7 +16,7 @@
 /// let provider = MockReleaseProvider()
 /// await provider.set(releaseToReturn: AvailableRelease(tagName: "v2.0.0", assets: [], checksumURL: nil))
 /// // or simulate a fetch failure:
-/// await provider.set(fetchResultToReturn: .failed)
+/// await provider.set(fetchResultToReturn: .failed(.networkError(underlying: URLError(.notConnectedToInternet))))
 /// ```
 actor MockReleaseProvider: ReleaseProvider {
 
@@ -32,7 +32,7 @@ actor MockReleaseProvider: ReleaseProvider {
     ///
     /// **Getter**: returns the `AvailableRelease?` associated with
     /// `.fetched(_)`. Crashes via `preconditionFailure` when
-    /// `fetchResultToReturn` is `.failed` — reading this property back to
+    /// `fetchResultToReturn` is `.failed(_)` — reading this property back to
     /// assert a failure condition is a test bug; use `fetchResultToReturn`
     /// directly instead.
     ///
@@ -42,17 +42,18 @@ actor MockReleaseProvider: ReleaseProvider {
     var releaseToReturn: AvailableRelease? {
         get {
             switch fetchResultToReturn {
-            case .fetched(let r):
-                return r
+            case .fetched(let r): return r
             case .failed:
                 preconditionFailure(
-                    "releaseToReturn getter called when fetchResultToReturn is .failed. "
+                    "releaseToReturn getter called when fetchResultToReturn is .failed(_). "
                     + "This is a test bug: use fetchResultToReturn directly to assert "
                     + "failure state instead of reading releaseToReturn."
                 )
             }
         }
-        set { fetchResultToReturn = .fetched(newValue) }
+        set {
+            fetchResultToReturn = .fetched(newValue)
+        }
     }
 
     /// Convenience: number of simulated async yield points per fetch call.

@@ -62,7 +62,8 @@ struct UpdateCheckerCheckForUpdateTests {
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
-              checkError == .missingVersionKey else {
+              checkError == .missingVersionKey
+        else {
             Issue.record("Expected .failed(.missingVersionKey), got \(result)")
             return
         }
@@ -76,21 +77,25 @@ struct UpdateCheckerCheckForUpdateTests {
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
-              checkError == .missingVersionKey else {
+              checkError == .missingVersionKey
+        else {
             Issue.record("Expected .failed(.missingVersionKey), got \(result)")
             return
         }
     }
 
-    @Test func failedFetchResult_emptyVersion_returnsNoReleasesFound() {
+    @Test func failedFetchResult_returnsNetworkError() {
+        let simulatedError = URLError(.notConnectedToInternet)
         let result = UpdateChecker.evaluate(
-            fetchResult: .failed,
+            fetchResult: .failed(.networkError(underlying: simulatedError)),
             currentVersion: ""
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
-              checkError == .noReleasesFound else {
-            Issue.record("Expected .failed(.noReleasesFound), got \(result)")
+              case .fetchFailed(let reason) = checkError,
+              case .networkError = reason
+        else {
+            Issue.record("Expected .failed(.fetchFailed(.networkError)), got \(result)")
             return
         }
     }
@@ -193,7 +198,6 @@ private struct FixtureRelease: Decodable {
     let tagName: String
     let prerelease: Bool
     let assets: [ReleaseAsset]
-
     enum CodingKeys: String, CodingKey {
         case tagName = "tag_name"
         case prerelease
