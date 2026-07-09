@@ -195,6 +195,12 @@ Store `private.pem` contents as a GitHub Actions secret (e.g. `ED25519_PRIVATE_K
 > OpenSSL via a file descriptor — the key is never written to disk, so there is
 > no cleanup step and no risk of the key persisting if the signing step fails.
 
+> **Tip — set the secret without copy-pasting:** Feed the file directly to `gh secret set` via a shell redirect:
+> ```bash
+> gh secret set ED25519_PRIVATE_KEY --repo your-org/your-repo < private.pem
+> ```
+> The `< file` redirect pipes the file contents as the secret value — no clipboard involved, no risk of trailing-newline or encoding issues.
+
 **4. Embed the public key in your app**
 
 Pass the raw 32-byte public key at `AppUpdater.init` time. It must live only in the app binary — never write it to `UserDefaults` or disk:
