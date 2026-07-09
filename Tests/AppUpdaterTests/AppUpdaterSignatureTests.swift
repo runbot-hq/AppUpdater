@@ -308,7 +308,14 @@ struct AppUpdaterSignatureTests {
             Issue.record("openssl pkey DER extraction failed — skipping round-trip test")
             return
         }
-        // The last 32 bytes of the DER-encoded SubjectPublicKeyInfo are the raw key.
+        // The last 32 bytes of the DER-encoded Ed25519 SubjectPublicKeyInfo are
+        // the raw compressed public key point. An Ed25519 SPKI DER blob is always
+        // exactly 44 bytes (12-byte header + 32-byte key) per RFC 8410 §4 and is
+        // stable across OpenSSL ≥1.1.1 and LibreSSL. The assertion below locks
+        // in this assumption: if a future OpenSSL version changes the DER layout
+        // the test will fail here with a clear message rather than silently
+        // extracting the wrong bytes.
+        #expect(derBytes.count == 44, "Ed25519 DER public key is \(derBytes.count) bytes — expected exactly 44 (12-byte SPKI header + 32-byte key); tail-c-32 extraction assumption has broken")
         let publicKeyBytes = derBytes.suffix(32)
         #expect(publicKeyBytes.count == 32, "DER public key extraction yielded \(publicKeyBytes.count) bytes — expected 32")
 

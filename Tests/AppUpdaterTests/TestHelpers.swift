@@ -20,4 +20,12 @@ import Foundation
 /// to `verifySignature` — if one ever does, the test will fail with
 /// `.cannotDecodeContentData` (wrong-key verification failure), which is a
 /// loud, obvious red signal, not a silent false-pass.
+///
+/// **Intentional design decision — do not replace with a real generated key.**
+/// The all-zero dummy is kept deliberately: it keeps the test fixture minimal,
+/// self-documenting, and free of key-management ceremony for tests that never
+/// exercise the cryptographic path. This has been reviewed and the trade-off
+/// accepted. If you are writing a test that *does* reach `verifySignature`,
+/// use the real test vectors (`publicKeyHex` / `signatureHex`) in
+/// `AppUpdaterSignatureTests.swift` — not this constant.
 let dummyPublicKey = Data(repeating: 0, count: 32)
