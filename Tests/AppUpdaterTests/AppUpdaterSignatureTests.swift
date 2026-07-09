@@ -37,11 +37,15 @@ struct AppUpdaterSignatureTests {
     private let wrongPublicKeyHex = "c5685cccd63e7e705aea6239a49feda80b6cadd65a80e13e8ac1f4b7307800b8"
 
     private func data(fromHex hex: String) -> Data {
+        precondition(hex.count.isMultiple(of: 2), "data(fromHex:) requires an even-length hex string, got \(hex.count) chars")
         var result = Data()
         var index = hex.startIndex
         while index < hex.endIndex {
             let next = hex.index(index, offsetBy: 2)
-            result.append(UInt8(hex[index..<next], radix: 16)!)
+            guard let byte = UInt8(hex[index..<next], radix: 16) else {
+                preconditionFailure("data(fromHex:) encountered non-hex characters in '\(hex[index..<next])'")
+            }
+            result.append(byte)
             index = next
         }
         return result
@@ -143,6 +147,30 @@ struct AppUpdaterSignatureTests {
                 zipURL: url,
                 signatureBytes: data(fromHex: signatureHex),
                 publicKeyBytes: truncatedKey
+            )
+        } catch {
+            thrown = error
+        }
+        let urlError = try #require(thrown as? URLError)
+        #expect(urlError.code == .cannotDecodeContentData)
+    }
+
+    // MARK: - verifySignature — empty signature bytes
+
+    /// An empty signature (zero bytes) is not a valid Ed25519 signature;
+    /// `isValidSignature` returns false, so the call must throw
+    /// `.cannotDecodeContentData`.
+    @Test func verifySignature_emptySignatureBytes_throwsCannotDecodeContentData() async throws {
+        let payload = Data("hello world".utf8)
+        let url = try writeTempFile(payload)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        var thrown: Error?
+        do {
+            try await verifySignature(
+                zipURL: url,
+                signatureBytes: Data(),
+                publicKeyBytes: data(fromHex: publicKeyHex)
             )
         } catch {
             thrown = error
