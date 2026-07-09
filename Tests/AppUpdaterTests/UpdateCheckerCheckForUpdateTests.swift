@@ -58,7 +58,8 @@ struct UpdateCheckerCheckForUpdateTests {
     @Test func emptyCurrentVersion_returnsMissingVersionKey() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(nil),
-            currentVersion: ""
+            currentVersion: "",
+            betaChannel: false
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
@@ -73,7 +74,8 @@ struct UpdateCheckerCheckForUpdateTests {
         let release = try #require(try firstRelease(fromFixture: "releases.newer"))
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release),
-            currentVersion: ""
+            currentVersion: "",
+            betaChannel: false
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
@@ -100,7 +102,8 @@ struct UpdateCheckerCheckForUpdateTests {
         let simulatedError = URLError(.notConnectedToInternet)
         let result = UpdateChecker.evaluate(
             fetchResult: .failed(.networkError(underlying: simulatedError)),
-            currentVersion: ""
+            currentVersion: "",
+            betaChannel: false
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
@@ -115,7 +118,8 @@ struct UpdateCheckerCheckForUpdateTests {
     @Test func failedFetchResult_returnsHttpError() {
         let result = UpdateChecker.evaluate(
             fetchResult: .failed(.httpError(statusCode: 429)),
-            currentVersion: ""
+            currentVersion: "",
+            betaChannel: false
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
@@ -134,7 +138,8 @@ struct UpdateCheckerCheckForUpdateTests {
         )
         let result = UpdateChecker.evaluate(
             fetchResult: .failed(.decodingError(underlying: simulatedError)),
-            currentVersion: ""
+            currentVersion: "",
+            betaChannel: false
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
@@ -162,7 +167,8 @@ struct UpdateCheckerCheckForUpdateTests {
         let badURLError = URLError(.badURL)
         let result = UpdateChecker.evaluate(
             fetchResult: .failed(.networkError(underlying: badURLError)),
-            currentVersion: "1.0.0"
+            currentVersion: "1.0.0",
+            betaChannel: false
         )
         guard case .failed(let error) = result,
               let checkError = error as? UpdateCheckError,
@@ -183,7 +189,8 @@ struct UpdateCheckerCheckForUpdateTests {
     @Test func malformedCurrentVersion_fetchedNil_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(nil),
-            currentVersion: "not-a-version"
+            currentVersion: "not-a-version",
+            betaChannel: false
         )
         guard case .upToDate = result else {
             Issue.record("Expected .upToDate for malformed currentVersion with nil release, got \(result)")
@@ -200,7 +207,8 @@ struct UpdateCheckerCheckForUpdateTests {
     @Test func malformedCurrentVersion_withValidRelease_returnsUpdateAvailable() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "v2.0.0")),
-            currentVersion: "not-a-version"
+            currentVersion: "not-a-version",
+            betaChannel: false
         )
         guard case .updateAvailable = result else {
             Issue.record("Expected .updateAvailable for malformed currentVersion with valid tag, got \(result)")
@@ -215,7 +223,8 @@ struct UpdateCheckerCheckForUpdateTests {
     @Test func malformedReleaseTag_validCurrentVersion_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "not-a-version")),
-            currentVersion: "1.0.0"
+            currentVersion: "1.0.0",
+            betaChannel: false
         )
         guard case .upToDate = result else {
             Issue.record("Expected .upToDate for malformed release tag, got \(result)")
@@ -264,6 +273,65 @@ struct UpdateCheckerCheckForUpdateTests {
     @Test func fixtureNewer_v200_notNewerThanItself() throws {
         let release = try #require(try firstRelease(fromFixture: "releases.newer"))
         #expect(UpdateChecker.isNewer(release.tagName, than: "2.0.0") == false)
+    }
+
+    // MARK: - Channel downgrade (issue #41)
+
+    /// Primary regression case for issue #41.
+    ///
+    /// User is on v1.0.0-beta.1 (pre-release, semver-ahead of stable).
+    /// They toggle betaChannel off. Latest stable is v0.9.9.
+    /// isNewer("v0.9.9", than: "v1.0.0-beta.1") is false (major 0 < 1),
+    /// so without the channel-downgrade guard the result would be .upToDate
+    /// and the user would be stranded forever. With the guard, .updateAvailable
+    /// is returned unconditionally because betaChannel == false && currentVersion
+    /// is a pre-release.
+    @Test func betaOff_prereleaseCurrent_stableAvailable_returnsUpdateAvailable() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(release(tag: "v0.9.9")),
+            currentVersion: "v1.0.0-beta.1",
+            betaChannel: false
+        )
+        guard case .updateAvailable(let offered) = result else {
+            Issue.record("Expected .updateAvailable(v0.9.9) for channel downgrade, got \(result)")
+            return
+        }
+        #expect(offered.tagName == "v0.9.9")
+    }
+
+    /// Confirms the channel-downgrade guard does NOT fire when betaChannel == true.
+    ///
+    /// User is on v1.0.0-beta.1 with beta enabled. Latest is v0.9.9 (stable,
+    /// which would only be returned by latestMatchingRelease if no beta exists,
+    /// but we test evaluate in isolation). isNewer("v0.9.9", than: "v1.0.0-beta.1")
+    /// is false, so .upToDate is the correct result — the guard must not fire.
+    @Test func betaOn_prereleaseCurrent_olderStableAvailable_returnsUpToDate() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(release(tag: "v0.9.9")),
+            currentVersion: "v1.0.0-beta.1",
+            betaChannel: true
+        )
+        guard case .upToDate = result else {
+            Issue.record("Expected .upToDate when betaChannel=true and current is ahead, got \(result)")
+            return
+        }
+    }
+
+    /// Confirms the channel-downgrade guard does NOT fire for a stable currentVersion.
+    ///
+    /// User is on v1.0.0 stable with beta off. Latest stable is v0.9.9.
+    /// isNewer returns false — .upToDate is correct. The guard checks
+    /// isPrerelease first, so a stable currentVersion never triggers it.
+    @Test func betaOff_stableCurrent_olderStableAvailable_returnsUpToDate() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(release(tag: "v0.9.9")),
+            currentVersion: "v1.0.0",
+            betaChannel: false
+        )
+        guard case .upToDate = result else {
+            Issue.record("Expected .upToDate when stable current is ahead, got \(result)")
+            return
+        }
     }
 }
 
