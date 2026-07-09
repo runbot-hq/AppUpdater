@@ -193,25 +193,28 @@ public enum UpdateChecker {
             }
             guard let release else { return .upToDate }
 
-            // Parse once and reuse below — avoids a redundant ParsedVersion(currentVersion)
-            // allocation on the isNewer fallthrough path.
+            // Parse both versions once and reuse in the downgrade guard and
+            // (for currentVersion) in the isNewer fallthrough path. Without
+            // caching, parsedCurrent would be allocated twice and parsedRelease
+            // would be allocated once with no reuse.
             let parsedCurrent = ParsedVersion(currentVersion)
+            let parsedRelease = ParsedVersion(release.tagName)
 
             // Channel downgrade: user opted out of beta while running a
             // pre-release that is semver-ahead of the best available stable.
             // isNewer would return false (stable is older), stranding the user
             // on their beta indefinitely. Offer the stable release regardless.
             //
-            // The third condition (!release.tagName.isPrerelease) is a
-            // defensive self-check. GitHubReleaseProvider already guarantees
-            // a stable-only candidate when betaChannel == false, so in the
-            // normal production path this is always true. The check protects
-            // against future callers that bypass the provider and pass an
-            // inconsistent (betaChannel: false, pre-release release) pair.
-            // If it fails, fall through to isNewer below.
+            // The third condition (!parsedRelease.isPrerelease) is a defensive
+            // self-check. GitHubReleaseProvider already guarantees a stable-only
+            // candidate when betaChannel == false, so in the normal production
+            // path this is always true. The check protects against future callers
+            // that bypass the provider and pass an inconsistent
+            // (betaChannel: false, pre-release release) pair. If it fails,
+            // fall through to isNewer below.
             if !betaChannel
                 && parsedCurrent.isPrerelease
-                && !ParsedVersion(release.tagName).isPrerelease {
+                && !parsedRelease.isPrerelease {
                 return .updateAvailable(release: release)
             }
 

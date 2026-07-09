@@ -202,20 +202,47 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// A garbage `currentVersion` with a valid release tag must not crash.
-    /// `ParsedVersion` returns `nil` for non-semver input and `isNewer` treats
-    /// a nil current version as `0.0.0`, so any parseable release tag wins and
-    /// `evaluate` returns `.updateAvailable`. This pins that production
-    /// fallback; a deliberate change to return `.failed` instead would require
-    /// updating this test and `ParsedVersion` together.
-    @Test func malformedCurrentVersion_withValidRelease_returnsUpdateAvailable() {
+    /// A garbage `currentVersion` with a valid stable release tag and
+    /// `betaChannel: true` exercises the `isNewer` fallback path.
+    ///
+    /// `ParsedVersion` is not failable — non-numeric segments default to `0`
+    /// and any hyphen triggers `isPrerelease = true`. With `betaChannel: true`
+    /// the channel-downgrade guard is skipped entirely, so control reaches
+    /// `isNewer("v2.0.0", than: "not-a-version")`. `ParsedVersion("not-a-version")`
+    /// splits on the first `-` producing core `"not"` → major=0, so `v2.0.0`
+    /// (major=2) wins and `evaluate` returns `.updateAvailable`. This pins the
+    /// `isNewer` fallback behaviour for malformed input; a deliberate change to
+    /// return `.failed` instead would require updating this test and
+    /// `ParsedVersion` together.
+    @Test func malformedCurrentVersion_withValidRelease_betaOn_returnsUpdateAvailable() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(release(tag: "v2.0.0")),
+            currentVersion: "not-a-version",
+            betaChannel: true
+        )
+        guard case .updateAvailable = result else {
+            Issue.record("Expected .updateAvailable for malformed currentVersion with valid tag (betaChannel: true), got \(result)")
+            return
+        }
+    }
+
+    /// A garbage `currentVersion` with a valid stable release tag and
+    /// `betaChannel: false` exercises the channel-downgrade guard path.
+    ///
+    /// `ParsedVersion("not-a-version")` splits on the first `-`, setting
+    /// `isPrerelease = true`. With `betaChannel: false` and a stable candidate
+    /// (`v2.0.0`), all three downgrade-guard conditions hold and `evaluate`
+    /// returns `.updateAvailable` via the guard — not via `isNewer`. This
+    /// is a distinct execution path from the `betaOn` variant above and is
+    /// pinned separately so the two paths cannot silently collapse.
+    @Test func malformedCurrentVersion_withValidRelease_betaOff_returnsUpdateAvailable() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "v2.0.0")),
             currentVersion: "not-a-version",
             betaChannel: false
         )
         guard case .updateAvailable = result else {
-            Issue.record("Expected .updateAvailable for malformed currentVersion with valid tag, got \(result)")
+            Issue.record("Expected .updateAvailable for malformed currentVersion with valid tag (betaChannel: false), got \(result)")
             return
         }
     }
@@ -385,8 +412,8 @@ struct UpdateCheckerCheckForUpdateTests {
     /// alongside a pre-release candidate, the channel-downgrade guard must NOT
     /// fire — the pre-release must not be offered as a "stable downgrade".
     ///
-    /// Without the third condition (!ParsedVersion(release.tagName).isPrerelease)
-    /// in the guard, this call would incorrectly return .updateAvailable(v2.0.0-beta.2).
+    /// Without the third condition (!parsedRelease.isPrerelease) in the guard,
+    /// this call would incorrectly return .updateAvailable(v2.0.0-beta.2).
     /// With it, control falls through to isNewer, which correctly returns .upToDate
     /// (v2.0.0-beta.2 is not newer than v2.0.0-beta.3).
     @Test func betaOff_prereleaseCurrent_prereleaseCandidateSlipsThrough_returnsUpToDate() {
