@@ -1,4 +1,4 @@
-<img width="240" alt="img" src="icon_masked2.png">
+<![CDATA[<img width="240" alt="img" src="icon_masked2.png">
 
 # AppUpdater
 
@@ -201,7 +201,8 @@ Pass the raw 32-byte public key at `AppUpdater.init` time. It must live only in 
 
 ```bash
 # Get base64 representation of public.key for embedding
-base64 -i public.key
+# tr -d '\n' strips the trailing newline; works on macOS (BSD) and Linux (GNU)
+base64 < public.key | tr -d '\n'
 ```
 
 ```swift
@@ -209,7 +210,7 @@ let updater = AppUpdater(
     repo: "your-org/your-repo",
     currentVersion: …,
     assetName: { _ in "YourApp.zip" },
-    publicKey: Data(base64Encoded: "<output of base64 -i public.key>")!,
+    publicKey: Data(base64Encoded: "<output of base64 < public.key | tr -d '\n'>")!,
     schedulerIdentifier: "com.your-org.update-check"
 )
 ```
@@ -220,7 +221,7 @@ let updater = AppUpdater(
 
 The `.sig` sidecar must be named exactly `<assetName>.sig` — i.e. if `assetName` returns `"YourApp.zip"`, the expected sidecar is `"YourApp.zip.sig"`. A file named `"YourApp.sig"` or `"YourApp.zip.signature"` will not be found and the download will be skipped.
 
-The sidecar must be the raw 64-byte Ed25519 signature of the zip file contents (produced by `openssl pkeyutl -sign -rawin` as shown above).
+The sidecar must be the **raw 64-byte Ed25519 signature** of the zip file contents (produced by `openssl pkeyutl -sign -rawin` as shown above). Do not base64-encode the `.sig` file — `AppUpdater` reads it with `Data(contentsOf:)` and passes the raw bytes directly to `CryptoKit.Curve25519.Signing.PublicKey.isValidSignature(_:for:)`, which expects raw binary, not base64.
 
 ## Trust model
 
@@ -268,4 +269,4 @@ A few notes :
 - **Sparkle** remains the gold standard for EdDSA authenticity, having shipped EdDSA (Ed25519) as its primary signature scheme since Sparkle 2, replacing the older DSA approach.
 - The original AppUpdater: https://github.com/mxcl/AppUpdater
 - hybrid Appupdater for macos and ios that supports appstore and github releases: https://github.com/TopScrech/AutoUpdate
-
+]]>
