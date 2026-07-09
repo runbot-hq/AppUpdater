@@ -310,6 +310,29 @@ struct UpdateCheckerCheckForUpdateTests {
         #expect(offered.tagName == "v0.9.9")
     }
 
+    /// Pins the guard for a newer stable candidate — the scenario where the
+    /// user is on a pre-release and beta is off, but a genuinely newer stable
+    /// exists (v2.1.0 > v2.0.0-beta.1 semver-wise).
+    ///
+    /// All three downgrade-guard conditions hold, so the guard fires and returns
+    /// `.updateAvailable(v2.1.0)` without ever consulting `isNewer`. This
+    /// ensures a guard-order swap (accidentally putting `isNewer` first) would
+    /// still return the correct result for the stranded-user shape, but would
+    /// break `betaOff_prereleaseCurrent_stableAvailable_returnsUpdateAvailable`
+    /// (the semver-behind case) — together the two tests fully pin the guard.
+    @Test func betaOff_prereleaseCurrent_newerStableAvailable_returnsUpdateAvailable() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(release(tag: "v2.1.0")),
+            currentVersion: "v2.0.0-beta.1",
+            betaChannel: false
+        )
+        guard case .updateAvailable(let offered) = result else {
+            Issue.record("Expected .updateAvailable(v2.1.0) for betaOff + newer stable, got \(result)")
+            return
+        }
+        #expect(offered.tagName == "v2.1.0")
+    }
+
     /// Confirms the channel-downgrade guard does NOT fire when betaChannel == true.
     ///
     /// isNewer("v0.9.9", than: "v1.0.0-beta.1") is false, so .upToDate is correct.

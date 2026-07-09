@@ -193,6 +193,10 @@ public enum UpdateChecker {
             }
             guard let release else { return .upToDate }
 
+            // Parse once and reuse below — avoids a redundant ParsedVersion(currentVersion)
+            // allocation on the isNewer fallthrough path.
+            let parsedCurrent = ParsedVersion(currentVersion)
+
             // Channel downgrade: user opted out of beta while running a
             // pre-release that is semver-ahead of the best available stable.
             // isNewer would return false (stable is older), stranding the user
@@ -206,7 +210,7 @@ public enum UpdateChecker {
             // inconsistent (betaChannel: false, pre-release release) pair.
             // If it fails, fall through to isNewer below.
             if !betaChannel
-                && ParsedVersion(currentVersion).isPrerelease
+                && parsedCurrent.isPrerelease
                 && !ParsedVersion(release.tagName).isPrerelease {
                 return .updateAvailable(release: release)
             }
