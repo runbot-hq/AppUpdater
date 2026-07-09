@@ -108,10 +108,14 @@ extension AppUpdater {
                 throw URLError(.badServerResponse)
             }
 
-            // Ed25519 signatures are exactly 64 bytes. Reject oversized sidecars
-            // before passing to CryptoKit — guards against a misconfigured or
-            // malicious release asset buffering a large payload in memory.
-            // 128-byte ceiling gives a byte of slack for e.g. a trailing newline.
+            // Ed25519 signatures are exactly 64 bytes. Reject grossly oversized
+            // sidecars before passing to CryptoKit — guards against a malicious
+            // or misconfigured release asset buffering a large payload in memory.
+            // Ceiling is 128 (2× the expected size) rather than 64 because some
+            // LibreSSL builds append a trailing newline; exact-64 enforcement
+            // happens inside CryptoKit's isValidSignature. Note: a base64-encoded
+            // .sig (88 bytes) would also pass this guard — callers must ensure the
+            // sidecar is raw binary, as documented in README § Distribution setup.
             guard signatureData.count <= 128 else {
                 appUpdaterLogger.error("signature sidecar is \(signatureData.count, privacy: .public) bytes — expected 64; rejecting oversized payload")
                 throw URLError(.cannotDecodeContentData)
