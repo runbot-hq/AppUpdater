@@ -391,6 +391,27 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
+    /// Regression pin for the normal stable-on-stable update path with betaChannel: false.
+    ///
+    /// The channel-downgrade guard does not fire (currentVersion is not a
+    /// pre-release), so control reaches `isNewer("v1.1.0", than: "v1.0.0")`,
+    /// which returns true. This is the most common production path — a stable
+    /// user receiving a newer stable release — and is pinned here to ensure
+    /// the betaChannel parameter threading introduced in this PR does not
+    /// accidentally suppress it.
+    @Test func betaOff_stableCurrent_newerStableAvailable_returnsUpdateAvailable() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(release(tag: "v1.1.0")),
+            currentVersion: "v1.0.0",
+            betaChannel: false
+        )
+        guard case .updateAvailable(let offered) = result else {
+            Issue.record("Expected .updateAvailable(v1.1.0) for stable-on-stable update, got \(result)")
+            return
+        }
+        #expect(offered.tagName == "v1.1.0")
+    }
+
     /// Pins the guard-ordering invariant: `guard let release` fires before the
     /// channel-downgrade check. If the guards were swapped, this test would
     /// catch it by returning .updateAvailable(nil) or crashing instead.
