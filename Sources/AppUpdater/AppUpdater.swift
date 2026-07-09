@@ -162,6 +162,11 @@ public final class AppUpdater {
     /// or failable `init`. The `precondition(publicKey.count == 32)` at init
     /// catches misconfiguration immediately; parsing happens once per download
     /// (24 h cadence) — the re-parse cost is negligible.
+    ///
+    /// Access level is `internal` (not `private`) deliberately: `AppUpdater+Download.swift`
+    /// reads this property in a cross-file extension of the same type. `private`
+    /// would break that access. It is not `public` — external consumers have no
+    /// legitimate reason to read the stored key back out; they injected it at init.
     let publicKey: Data
 
     /// When `false`, `installAndRelaunch` verifies that the running bundle and
