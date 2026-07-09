@@ -183,7 +183,7 @@ Upload both `YourApp.zip` and `YourApp.zip.sig` as assets on the GitHub Release.
 Store `private.pem` contents as a GitHub Actions secret (e.g. `ED25519_PRIVATE_KEY`), then:
 
 ```yaml
-- name: Sign release artifact
+- name: Sign release artifact  # illustrative only — see disclaimer above
   run: |
     echo "${{ secrets.ED25519_PRIVATE_KEY }}" > private.pem
     openssl pkeyutl -sign -rawin -inkey private.pem -in YourApp.zip -out YourApp.zip.sig
