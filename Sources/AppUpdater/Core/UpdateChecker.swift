@@ -115,7 +115,18 @@ public enum UpdateChecker {
     /// ## Access
     ///
     /// Intentionally `internal`, not `public`. Reached by `AppUpdater+UpdateFlow`
-    /// and directly by tests via `@testable import`. ❌ DO NOT make public.
+    /// and directly by tests via `@testable import`. ❌ DO NOT make public:
+    /// the `evaluate` signature is an implementation detail; external callers
+    /// must go through `checkForUpdate`.
+    ///
+    /// ## Why `ReleaseFetchResult` not `(AvailableRelease?, Bool)`
+    ///
+    /// The previous signature `(availableRelease: AvailableRelease?, fetchFailed: Bool)`
+    /// allowed callers to pass a non-nil release alongside `fetchFailed: true` —
+    /// a structurally inconsistent state that compiled fine but silently discarded
+    /// the release. Taking `ReleaseFetchResult` directly makes inconsistent states
+    /// impossible at the type level and collapses both call sites from a switch +
+    /// two evaluate calls into a single call.
     ///
     /// ## Priority order
     ///
@@ -144,6 +155,30 @@ public enum UpdateChecker {
     /// a pre-release as a "stable downgrade". If the check fails, control falls
     /// through to `isNewer` which handles pre-release-to-pre-release comparison
     /// correctly.
+    ///
+    /// The user is then prompted to install the stable release as a downgrade.
+    /// This mirrors the expected product behaviour: opting out of beta means
+    /// "take me back to stable", not "keep me on this beta forever".
+    ///
+    /// ## Return values
+    ///
+    /// - `.failed(.fetchFailed(fetchError))` — `fetchResult` is `.failed`;
+    ///   `fetchError` is a `ReleaseFetchError` describing the root cause
+    ///   (`.networkError`, `.httpError(statusCode:)`, or `.decodingError`).
+    /// - `.failed(.missingVersionKey)` — `currentVersion` is empty (and fetch
+    ///   did not fail).
+    /// - `.upToDate` — `fetchResult` is `.fetched(nil)` (no channel match) or
+    ///   the fetched release is not newer than `currentVersion` and no channel
+    ///   downgrade applies.
+    /// - `.updateAvailable` — fetched release is newer than `currentVersion`,
+    ///   **or** a channel downgrade from beta to stable is required.
+    ///
+    /// ## Exhaustion enforcement
+    ///
+    /// `fetchResult` is matched with a `switch` (no `default`) so that adding
+    /// a new case to `ReleaseFetchResult` produces a compiler error here,
+    /// forcing an explicit handling decision. Do not add a `default` or
+    /// `@unknown default` arm — either would silently swallow new cases.
     static func evaluate(
         fetchResult: ReleaseFetchResult,
         currentVersion: String,
@@ -183,9 +218,37 @@ public enum UpdateChecker {
 
     /// Checks for an available update for `repo`.
     ///
-    /// ❌ DO NOT remove the `GitHubReleaseProvider()` instantiation here.
+    /// This overload performs the full fetch+compare pipeline using
+    /// `GitHubReleaseProvider` directly. It exists for call sites that do not
+    /// have an injected provider (e.g. one-shot CLI usage). `AppUpdater` uses
+    /// the instance-level `checkForUpdate` which goes through the injected
+    /// provider instead.
+    ///
+    /// ## ❌ DO NOT remove the `GitHubReleaseProvider()` instantiation here
+    ///
     /// This static method is a deliberate convenience entry point for one-shot
-    /// callers (CLI tools, Previews) that have no `AppUpdater` instance.
+    /// callers that have no `AppUpdater` instance (e.g. CLI tools, Previews).
+    /// It creates a `GitHubReleaseProvider` inline, which introduces a
+    /// compile-time dependency from `UpdateChecker` (business logic) to
+    /// `GitHubReleaseProvider` (network layer).
+    ///
+    /// This coupling is intentional and acceptable in the current single-target
+    /// structure. If `GitHubReleaseProvider` is ever moved to a separate Swift
+    /// Package target, this method must be updated (or moved to the new target)
+    /// at the same time — it will not compile otherwise. Do not attempt to
+    /// "fix" the coupling by injecting a `ReleaseProvider` parameter here;
+    /// that would break all existing one-shot call sites. Use the instance-level
+    /// `AppUpdater.checkForUpdate` if you need provider injection.
+    ///
+    /// ## Return values
+    ///
+    /// - `.upToDate` — latest eligible release is not newer than `currentVersion`,
+    ///   **or** no release matched the channel (stable user, beta-only repo).
+    /// - `.updateAvailable` — a newer eligible release was found.
+    /// - `.failed(.fetchFailed(fetchError))` — fetch, HTTP, or decode failure;
+    ///   inspect `fetchError` for the specific `ReleaseFetchError` case.
+    /// - `.failed(.missingVersionKey)` — `currentVersion` is empty and fetch
+    ///   did not fail.
     public static func checkForUpdate(
         repo: String,
         currentVersion: String,
