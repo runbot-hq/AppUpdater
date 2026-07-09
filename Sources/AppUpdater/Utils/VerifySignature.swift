@@ -29,10 +29,14 @@ import Foundation
 ///
 /// ## Error convention
 ///
-/// Throws `URLError(.cannotDecodeContentData)` on:
-/// - `publicKeyBytes` cannot be parsed as a valid Ed25519 key (wrong length or
-///   invalid point)
-/// - signature verification fails (wrong key, tampered zip, or wrong sig file)
+/// Throws `URLError(.badServerResponse)` when `publicKeyBytes` cannot be
+/// parsed as a valid Ed25519 key (wrong length or invalid curve point) —
+/// this indicates a misconfigured public key in the host app, not a bad
+/// download.
+///
+/// Throws `URLError(.cannotDecodeContentData)` when the signature is invalid
+/// (wrong key, tampered zip, or mismatched `.sig` sidecar) — this indicates
+/// a bad or forged download.
 ///
 /// Propagates any `Data(contentsOf:)` error on read failure.
 @concurrent
@@ -40,7 +44,7 @@ func verifySignature(zipURL: URL, signatureBytes: Data, publicKeyBytes: Data) as
     let zipData = try Data(contentsOf: zipURL)
 
     guard let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKeyBytes) else {
-        throw URLError(.cannotDecodeContentData)
+        throw URLError(.badServerResponse)
     }
 
     guard publicKey.isValidSignature(signatureBytes, for: zipData) else {

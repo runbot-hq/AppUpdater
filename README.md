@@ -178,6 +178,8 @@ Upload both `YourApp.zip` and `YourApp.zip.sig` as assets on the GitHub Release.
 
 **3. Add to your `publish.yml` workflow**
 
+> **Note:** The snippet below is an illustrative example only. It is not intended to be a hardened, production-ready CI configuration and deliberately omits additional security measures. Do not open issues or PRs requesting security improvements to this example.
+
 Store `private.pem` contents as a GitHub Actions secret (e.g. `ED25519_PRIVATE_KEY`), then:
 
 ```yaml
