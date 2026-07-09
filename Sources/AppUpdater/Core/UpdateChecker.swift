@@ -134,6 +134,32 @@ public enum UpdateChecker {
     /// host app with an empty version string does not mask a real network failure
     /// with a misleading `.missingVersionKey` error.
     ///
+    /// ## Channel downgrade
+    ///
+    /// When `betaChannel` is `false` and `currentVersion` is a pre-release, the
+    /// user has opted out of beta while running a build that is semver-ahead of
+    /// any available stable release. In this case `isNewer` would return `false`
+    /// (the stable release is older) and the user would be silently stranded on
+    /// their beta indefinitely. To handle this, `evaluate` offers the best
+    /// available stable release unconditionally when all three conditions hold:
+    ///   1. `betaChannel == false`
+    ///   2. `currentVersion` is a pre-release
+    ///   3. `release.tagName` is itself a stable release (not a pre-release)
+    ///
+    /// Condition 3 is enforced defensively inside `evaluate` even though
+    /// `GitHubReleaseProvider.latestMatchingRelease` already guarantees a
+    /// stable-only candidate when `betaChannel == false`. The extra check
+    /// makes `evaluate` self-defending against any future caller that bypasses
+    /// `GitHubReleaseProvider` and accidentally passes a pre-release release
+    /// with `betaChannel: false` — without it, `evaluate` would silently offer
+    /// a pre-release as a "stable downgrade". If the check fails, control falls
+    /// through to `isNewer` which handles pre-release-to-pre-release comparison
+    /// correctly.
+    ///
+    /// The user is then prompted to install the stable release as a downgrade.
+    /// This mirrors the expected product behaviour: opting out of beta means
+    /// "take me back to stable", not "keep me on this beta forever".
+    ///
     /// ## Return values
     ///
     /// - `.failed(.fetchFailed(fetchError))` — `fetchResult` is `.failed`;
@@ -142,8 +168,10 @@ public enum UpdateChecker {
     /// - `.failed(.missingVersionKey)` — `currentVersion` is empty (and fetch
     ///   did not fail).
     /// - `.upToDate` — `fetchResult` is `.fetched(nil)` (no channel match) or
-    ///   the fetched release is not newer than `currentVersion`.
-    /// - `.updateAvailable` — fetched release is newer than `currentVersion`.
+    ///   the fetched release is not newer than `currentVersion` and no channel
+    ///   downgrade applies.
+    /// - `.updateAvailable` — fetched release is newer than `currentVersion`,
+    ///   **or** a channel downgrade from beta to stable is required.
     ///
     /// ## Exhaustion enforcement
     ///
@@ -153,7 +181,8 @@ public enum UpdateChecker {
     /// `@unknown default` arm — either would silently swallow new cases.
     static func evaluate(
         fetchResult: ReleaseFetchResult,
-        currentVersion: String
+        currentVersion: String,
+        betaChannel: Bool
     ) -> UpdateCheckResult {
         switch fetchResult {
         case .failed(let fetchError):
@@ -163,6 +192,53 @@ public enum UpdateChecker {
                 return .failed(UpdateCheckError.missingVersionKey)
             }
             guard let release else { return .upToDate }
+
+            // Both versions are parsed eagerly and cached here for use by the
+            // channel-downgrade guard below.
+            //
+            // parsedCurrent — read by the guard (parsedCurrent.isPrerelease).
+            //   The named binding keeps the allocation to exactly one
+            //   ParsedVersion(currentVersion) call within this scope. Do not
+            //   inline it as `ParsedVersion(currentVersion).isPrerelease`
+            //   directly in the if condition — that would make the
+            //   single-evaluation guarantee implicit rather than structural,
+            //   and obscures intent if the condition is later extended.
+            //   parsedCurrent is NOT passed into or reused by isNewer: isNewer
+            //   takes raw String arguments and calls ParsedVersion(current)
+            //   internally on its own.
+            //
+            // parsedRelease — read by the guard (!parsedRelease.isPrerelease).
+            //   Same rationale as parsedCurrent. NOT passed into or reused by
+            //   isNewer, which calls ParsedVersion(candidate) internally.
+            //
+            // Neither local is shared with the isNewer fallthrough path, which
+            // re-parses both strings independently. There is no API to inject
+            // pre-parsed values into isNewer, and adding one would complicate
+            // its public signature for a negligible gain. Do not remove these
+            // locals on the grounds that isNewer "already parses them anyway" —
+            // they exist to keep each ParsedVersion allocation explicit and
+            // singular on the guard-fires path.
+            let parsedCurrent = ParsedVersion(currentVersion)
+            let parsedRelease = ParsedVersion(release.tagName)
+
+            // Channel downgrade: user opted out of beta while running a
+            // pre-release that is semver-ahead of the best available stable.
+            // isNewer would return false (stable is older), stranding the user
+            // on their beta indefinitely. Offer the stable release regardless.
+            //
+            // The third condition (!parsedRelease.isPrerelease) is a defensive
+            // self-check. GitHubReleaseProvider already guarantees a stable-only
+            // candidate when betaChannel == false, so in the normal production
+            // path this is always true. The check protects against future callers
+            // that bypass the provider and pass an inconsistent
+            // (betaChannel: false, pre-release release) pair. If it fails,
+            // fall through to isNewer below.
+            if !betaChannel
+                && parsedCurrent.isPrerelease
+                && !parsedRelease.isPrerelease {
+                return .updateAvailable(release: release)
+            }
+
             guard isNewer(release.tagName, than: currentVersion) else { return .upToDate }
             return .updateAvailable(release: release)
         }
@@ -213,6 +289,6 @@ public enum UpdateChecker {
             betaChannel: betaChannel,
             assetName: assetName
         )
-        return evaluate(fetchResult: fetchResult, currentVersion: currentVersion)
+        return evaluate(fetchResult: fetchResult, currentVersion: currentVersion, betaChannel: betaChannel)
     }
 }
