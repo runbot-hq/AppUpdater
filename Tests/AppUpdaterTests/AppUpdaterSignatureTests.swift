@@ -237,7 +237,7 @@ struct AppUpdaterSignatureTests {
             process.standardError = FileHandle.nullDevice
             process.terminationHandler = { p in
                 if p.terminationStatus == 0,
-                   let path = String( pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                   let path = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
                        .trimmingCharacters(in: .whitespacesAndNewlines),
                    !path.isEmpty {
                     continuation.resume(returning: path)
