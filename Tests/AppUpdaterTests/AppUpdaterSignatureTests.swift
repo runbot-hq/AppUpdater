@@ -214,6 +214,103 @@ struct AppUpdaterSignatureTests {
         #expect(thrown != nil)
     }
 
+    // MARK: - openssl ↔ CryptoKit round-trip
+
+    /// Signs a payload with `openssl pkeyutl -sign -rawin` and verifies the
+    /// resulting signature with `verifySignature` (CryptoKit).
+    ///
+    /// This test exists specifically to catch format incompatibilities between
+    /// the `openssl` signing path documented in the README and the CryptoKit
+    /// verification path in production code. The baked-in test vectors above
+    /// only exercise the CryptoKit-to-CryptoKit path.
+    ///
+    /// Skipped automatically when `openssl` is not found in PATH — the test
+    /// is an integration smoke-check, not a hard CI requirement.
+    @Test func verifySignature_opensslSignedPayload_doesNotThrow() async throws {
+        // Locate openssl — skip gracefully if not available.
+        let opensslPath = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            let process = Process()
+            process.executableURL = URL(filePath: "/usr/bin/which")
+            process.arguments = ["openssl"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            process.terminationHandler = { p in
+                if p.terminationStatus == 0,
+                   let path = String( pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                       .trimmingCharacters(in: .whitespacesAndNewlines),
+                   !path.isEmpty {
+                    continuation.resume(returning: path)
+                } else {
+                    continuation.resume(throwing: URLError(.unsupportedURL))
+                }
+            }
+            try? process.run()
+        }
+
+        let tmp = FileManager.default.temporaryDirectory
+        let privatePEM = tmp.appendingPathComponent("test-\(UUID().uuidString).pem")
+        let payloadURL = tmp.appendingPathComponent("test-\(UUID().uuidString).zip")
+        let sigURL     = tmp.appendingPathComponent("test-\(UUID().uuidString).sig")
+        defer {
+            try? FileManager.default.removeItem(at: privatePEM)
+            try? FileManager.default.removeItem(at: payloadURL)
+            try? FileManager.default.removeItem(at: sigURL)
+        }
+
+        // 1. Generate an Ed25519 private key.
+        let genResult = await runCommand(opensslPath, args: [
+            "genpkey", "-algorithm", "Ed25519", "-out", privatePEM.path
+        ])
+        guard genResult else {
+            Issue.record("openssl genpkey failed — skipping round-trip test")
+            return
+        }
+
+        // 2. Write a known payload to disk.
+        let payload = Data("openssl-cryptokit-roundtrip".utf8)
+        try payload.write(to: payloadURL)
+
+        // 3. Sign with openssl pkeyutl -sign -rawin (the README-documented path).
+        let signResult = await runCommand(opensslPath, args: [
+            "pkeyutl", "-sign", "-rawin",
+            "-inkey", privatePEM.path,
+            "-in",    payloadURL.path,
+            "-out",   sigURL.path
+        ])
+        guard signResult else {
+            Issue.record("openssl pkeyutl -sign failed — skipping round-trip test")
+            return
+        }
+
+        // 4. Extract the raw 32-byte public key via DER tail.
+        //    `openssl pkey -pubout -outform DER | tail -c 32` gives the raw
+        //    RFC 8032 compressed point that CryptoKit expects.
+        let pubkeyProcess = Process()
+        pubkeyProcess.executableURL = URL(filePath: opensslPath)
+        pubkeyProcess.arguments = ["pkey", "-in", privatePEM.path, "-pubout", "-outform", "DER"]
+        let pubkeyPipe = Pipe()
+        pubkeyProcess.standardOutput = pubkeyPipe
+        pubkeyProcess.standardError  = FileHandle.nullDevice
+        try pubkeyProcess.run()
+        pubkeyProcess.waitUntilExit()
+        let derBytes = pubkeyPipe.fileHandleForReading.readDataToEndOfFile()
+        // The last 32 bytes of the DER-encoded SubjectPublicKeyInfo are the raw key.
+        let publicKeyBytes = derBytes.suffix(32)
+        #expect(publicKeyBytes.count == 32, "DER public key extraction yielded \(publicKeyBytes.count) bytes — expected 32")
+
+        // 5. Read the openssl-produced signature.
+        let signatureBytes = try Data(contentsOf: sigURL)
+        #expect(signatureBytes.count == 64, "openssl signature is \(signatureBytes.count) bytes — expected 64")
+
+        // 6. Verify with CryptoKit via the real production function.
+        try await verifySignature(
+            zipURL: payloadURL,
+            signatureBytes: signatureBytes,
+            publicKeyBytes: Data(publicKeyBytes)
+        )
+    }
+
     // MARK: - fixedZipURL
 
     /// The zip is always named `update.zip` — verify both the full filename and
