@@ -117,7 +117,7 @@ extension AppUpdater {
             // validator — exact-64 enforcement happens inside CryptoKit's
             // isValidSignature. Note: a base64-encoded .sig (88 bytes) would also
             // pass this guard; callers must ensure the sidecar is raw binary, as
-            // documented in README § Distribution setup.
+            // documented in README § Distribution assumptions.
             guard signatureData.count <= 128 else {
                 appUpdaterLogger.error("signature sidecar is \(signatureData.count, privacy: .public) bytes — expected 64; rejecting oversized payload")
                 throw URLError(.cannotDecodeContentData)
@@ -127,7 +127,7 @@ extension AppUpdater {
                     """
                     signature sidecar is \(signatureData.count, privacy: .public) bytes, not 64 — \
                     this may be a base64-encoded .sig instead of raw binary; \
-                    see README § Distribution setup
+                    see README § Distribution assumptions
                     """
                 )
             }

@@ -184,6 +184,7 @@ Store `private.pem` contents as a GitHub Actions secret (e.g. `ED25519_PRIVATE_K
 
 ```yaml
 - name: Sign release artifact  # illustrative only — see disclaimer above
+  shell: bash  # required: <(...) process substitution is bash-specific
   run: |
     openssl pkeyutl -sign -rawin \
       -inkey <(echo "${{ secrets.ED25519_PRIVATE_KEY }}") \
