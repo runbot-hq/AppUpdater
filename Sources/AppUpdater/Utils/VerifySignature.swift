@@ -45,8 +45,11 @@ func verifySignature(zipURL: URL, signatureBytes: Data, publicKeyBytes: Data) as
 
     guard let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKeyBytes) else {
         appUpdaterLogger.error(
-            // swiftlint:disable:next line_length
-            "verifySignature: could not parse publicKeyBytes as a Curve25519 public key — check that the key is a valid 32-byte Ed25519 raw public key (not PEM, not DER, not base64)"
+            """
+            verifySignature: could not parse publicKeyBytes as a Curve25519 public key \
+            — check that the key is a valid 32-byte Ed25519 raw public key \
+            (not PEM, not DER, not base64)
+            """
         )
         throw URLError(.badServerResponse)
     }
