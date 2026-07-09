@@ -193,22 +193,25 @@ public enum UpdateChecker {
             }
             guard let release else { return .upToDate }
 
-            // Both versions are parsed eagerly and cached here.
+            // Both versions are parsed eagerly and cached here for use by the
+            // channel-downgrade guard below.
             //
-            // parsedCurrent — used by the downgrade guard (parsedCurrent.isPrerelease)
-            //   and would otherwise be re-parsed inside isNewer on the fallthrough
-            //   path. Caching avoids that redundant allocation.
+            // parsedCurrent — read by the guard (parsedCurrent.isPrerelease).
+            //   Used only here; NOT passed into or reused by isNewer. isNewer
+            //   takes raw String arguments and calls ParsedVersion(current)
+            //   internally on its own.
             //
-            // parsedRelease — used by the downgrade guard (!parsedRelease.isPrerelease)
-            //   only. It is NOT passed into isNewer: isNewer takes raw String
-            //   arguments and performs its own internal ParsedVersion allocations
-            //   unconditionally. There is no API to inject a pre-parsed value, and
-            //   adding one would complicate isNewer's public signature for a
-            //   negligible gain. Caching parsedRelease therefore eliminates the
-            //   allocation on the guard-fires path but does not affect the isNewer
-            //   fallthrough path, which re-parses release.tagName independently.
-            //   This asymmetry is intentional — do not remove parsedRelease on the
-            //   grounds that isNewer "already parses it anyway".
+            // parsedRelease — read by the guard (!parsedRelease.isPrerelease).
+            //   Used only here; NOT passed into or reused by isNewer. isNewer
+            //   calls ParsedVersion(candidate) internally on its own.
+            //
+            // Neither local is shared with the isNewer fallthrough path, which
+            // re-parses both strings independently. There is no API to inject
+            // pre-parsed values into isNewer, and adding one would complicate
+            // its public signature for a negligible gain. Do not remove these
+            // locals on the grounds that isNewer "already parses them anyway" —
+            // they exist to avoid a second ParsedVersion allocation inside the
+            // same if condition on the guard-fires path.
             let parsedCurrent = ParsedVersion(currentVersion)
             let parsedRelease = ParsedVersion(release.tagName)
 
