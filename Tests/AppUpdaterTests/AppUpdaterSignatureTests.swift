@@ -151,8 +151,8 @@ struct AppUpdaterSignatureTests {
     // MARK: - verifySignature — invalid public key bytes
 
     /// Passing fewer than 32 bytes as the public key must throw
-    /// `.cannotDecodeContentData` (invalid key parse).
-    @Test func verifySignature_invalidPublicKeyBytes_throwsCannotDecodeContentData() async throws {
+    /// `.badServerResponse` (invalid key parse — misconfigured public key).
+    @Test func verifySignature_invalidPublicKeyBytes_throwsBadServerResponse() async throws {
         let payload = Data("hello world".utf8)
         let url = try writeTempFile(payload)
         defer { try? FileManager.default.removeItem(at: url) }
@@ -169,7 +169,7 @@ struct AppUpdaterSignatureTests {
             thrown = error
         }
         let urlError = try #require(thrown as? URLError)
-        #expect(urlError.code == .cannotDecodeContentData)
+        #expect(urlError.code == .badServerResponse)
     }
 
     // MARK: - verifySignature — empty signature bytes
