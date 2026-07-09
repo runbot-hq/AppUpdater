@@ -31,6 +31,7 @@ import AppKit
 ///     repo: "your-org/your-repo",
 ///     currentVersion: "1.2.3",
 ///     assetName: { _ in "YourApp.zip" },
+///     publicKey: Data(base64Encoded: "<your-32-byte-ed25519-public-key-base64>")!,
 ///     schedulerIdentifier: "com.your-org.update-check",
 ///     betaChannelProvider: { UserDefaults.standard.bool(forKey: "betaChannel") }
 /// )

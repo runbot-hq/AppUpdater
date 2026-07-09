@@ -27,7 +27,7 @@ struct AppUpdaterSignatureTests {
     //
     // Payload: "hello world" (UTF-8)
 
-    /// Raw 32-byte Ed25519 public key that signed `helloWorldSignatureHex`.
+    /// Raw 32-byte Ed25519 public key that signed `signatureHex`.
     private let publicKeyHex    = "e93518e72ee94d5277d3d79556b045376caddd541a35109d2d1647f250ac754b"
 
     /// Raw 64-byte Ed25519 signature of "hello world" under `publicKeyHex`.
