@@ -86,18 +86,22 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// Verifies that a `.failed` fetch result propagates as
-    /// `.failed(.fetchFailed(.networkError))` regardless of `currentVersion`.
-    ///
-    /// ## ⚠️ currentVersion: "" is intentional — ordering dependency
-    ///
-    /// A reviewer may expect `currentVersion: ""` to produce
-    /// `.failed(.missingVersionKey)` instead. It does not, because
-    /// `UpdateChecker.evaluate` checks `.failed` fetch results *before* the
-    /// empty-version guard: a failed fetch is always a fetch failure regardless
-    /// of what `currentVersion` contains. `emptyCurrentVersion_returnsMissingVersionKey`
-    /// above covers the `.fetched(nil)` + empty version path. The two tests
-    /// are complementary, not contradictory.
+    // MARK: - Failed fetch results
+    //
+    // ⚠️ currentVersion: "" in the three tests below is intentional — ordering dependency.
+    //
+    // A reviewer may expect currentVersion: "" to produce .failed(.missingVersionKey).
+    // It does not. evaluate checks .failed fetch results *before* the empty-version
+    // guard — a failed fetch is always a fetch failure regardless of what currentVersion
+    // contains. The guard ordering in evaluate is:
+    //   1. if case .failed = fetchResult  →  return .failed(.fetchFailed(...))
+    //   2. guard !currentVersion.isEmpty  →  return .failed(.missingVersionKey)
+    //   3. guard let release              →  return .upToDate
+    //   4. channel-downgrade check
+    //   5. isNewer check
+    // emptyCurrentVersion_returnsMissingVersionKey above covers the .fetched(nil) +
+    // empty version path. These tests are complementary, not contradictory.
+
     @Test func failedFetchResult_returnsNetworkError() {
         let simulatedError = URLError(.notConnectedToInternet)
         let result = UpdateChecker.evaluate(
@@ -116,6 +120,7 @@ struct UpdateCheckerCheckForUpdateTests {
     }
 
     @Test func failedFetchResult_returnsHttpError() {
+        // currentVersion: "" is intentional — see ordering note in the MARK above.
         let result = UpdateChecker.evaluate(
             fetchResult: .failed(.httpError(statusCode: 429)),
             currentVersion: "",
@@ -133,6 +138,7 @@ struct UpdateCheckerCheckForUpdateTests {
     }
 
     @Test func failedFetchResult_returnsDecodingError() {
+        // currentVersion: "" is intentional — see ordering note in the MARK above.
         let simulatedError = DecodingError.dataCorrupted(
             .init(codingPath: [], debugDescription: "fixture decode failure")
         )
@@ -286,6 +292,17 @@ struct UpdateCheckerCheckForUpdateTests {
     /// and the user would be stranded forever. With the guard, .updateAvailable
     /// is returned unconditionally because betaChannel == false && currentVersion
     /// is a pre-release.
+    ///
+    /// ## Precondition: release(tag: "v0.9.9") is stable by construction
+    ///
+    /// A reviewer may ask: "how do we know the offered release is stable and not
+    /// another beta?" The answer is that in production, `latestMatchingRelease`
+    /// filters to stable-only releases *before* calling `evaluate` when
+    /// `betaChannel == false`. By the time `evaluate` is reached, `release` is
+    /// guaranteed to be the best available stable candidate. This test exercises
+    /// `evaluate` in isolation using a hand-constructed stable tag to reflect
+    /// that invariant directly — it does not need to go through
+    /// `latestMatchingRelease` to be a valid regression test.
     @Test func betaOff_prereleaseCurrent_stableAvailable_returnsUpdateAvailable() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "v0.9.9")),
