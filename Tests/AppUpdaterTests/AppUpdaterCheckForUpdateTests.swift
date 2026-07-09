@@ -33,9 +33,9 @@ struct AppUpdaterCheckForUpdateTests {
         )
     }
 
-    /// Minimal `AvailableRelease` fixture — no assets, no checksum URL.
+    /// Minimal `AvailableRelease` fixture — no assets, no signature URL.
     private func release(tag: String) -> AvailableRelease {
-        AvailableRelease(tagName: tag, assets: [], checksumURL: nil)
+        AvailableRelease(tagName: tag, assets: [], signatureURL: nil)
     }
 
     // MARK: - 1. Provider returns .failed → .failed(.fetchFailed(.networkError))

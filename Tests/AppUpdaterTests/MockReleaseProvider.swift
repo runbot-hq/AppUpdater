@@ -14,7 +14,7 @@
 ///
 /// ```swift
 /// let provider = MockReleaseProvider()
-/// await provider.set(releaseToReturn: AvailableRelease(tagName: "v2.0.0", assets: [], checksumURL: nil))
+/// await provider.set(releaseToReturn: AvailableRelease(tagName: "v2.0.0", assets: [], signatureURL: nil))
 /// // or simulate a fetch failure:
 /// await provider.set(fetchResultToReturn: .failed(.networkError(underlying: URLError(.notConnectedToInternet))))
 /// ```

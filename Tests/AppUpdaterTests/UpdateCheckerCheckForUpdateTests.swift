@@ -32,25 +32,25 @@ struct UpdateCheckerCheckForUpdateTests {
     }
 
     /// Decodes the first entry in the fixture and builds an `AvailableRelease`
-    /// using `assetName` to find the checksum sidecar.
+    /// using `assetName` to find the signature sidecar.
     private func firstRelease(
         fromFixture name: String,
         assetName: (String) -> String = { _ in "App.zip" }
     ) throws -> AvailableRelease? {
         let fixtures = try loadFixture(named: name)
         guard let first = fixtures.first else { return nil }
-        let checksumAssetName = assetName(first.tagName) + ".sha256"
-        let checksumAsset = first.assets.first(where: { $0.name == checksumAssetName })
+        let signatureAssetName = assetName(first.tagName) + ".sig"
+        let signatureAsset = first.assets.first(where: { $0.name == signatureAssetName })
         return AvailableRelease(
             tagName: first.tagName,
             assets: first.assets,
-            checksumURL: checksumAsset?.browserDownloadURL
+            signatureURL: signatureAsset?.browserDownloadURL
         )
     }
 
     /// Builds a minimal `AvailableRelease` with a custom tag and no assets.
     private func release(tag: String) -> AvailableRelease {
-        AvailableRelease(tagName: tag, assets: [], checksumURL: nil)
+        AvailableRelease(tagName: tag, assets: [], signatureURL: nil)
     }
 
     // MARK: - missingVersionKey
@@ -270,9 +270,9 @@ struct UpdateCheckerCheckForUpdateTests {
         #expect(release.tagName == "v2.0.0")
     }
 
-    @Test func fixtureNewer_checksumURLPresent() throws {
+    @Test func fixtureNewer_signatureURLPresent() throws {
         let release = try #require(try firstRelease(fromFixture: "releases.newer"))
-        #expect(release.checksumURL != nil)
+        #expect(release.signatureURL != nil)
     }
 
     @Test func fixtureNewer_assetListContainsZip() throws {

@@ -57,8 +57,8 @@ public protocol ReleaseProvider: Sendable {
     ///   - repo: `"owner/name"` GitHub repository slug.
     ///   - betaChannel: When `true`, pre-release builds are candidates.
     ///   - assetName: Maps a tag name to the expected zip asset filename;
-    ///     used to resolve the SHA-256 sidecar URL
-    ///     (`<assetName(tagName)>.sha256`) from the release's asset list.
+    ///     used to resolve the signature sidecar URL
+    ///     (`<assetName(tagName)>.sig`) from the release's asset list.
     func fetchLatestRelease(
         repo: String,
         betaChannel: Bool,
