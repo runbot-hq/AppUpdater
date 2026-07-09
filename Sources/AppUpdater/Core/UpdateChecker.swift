@@ -197,21 +197,27 @@ public enum UpdateChecker {
             // channel-downgrade guard below.
             //
             // parsedCurrent — read by the guard (parsedCurrent.isPrerelease).
-            //   Used only here; NOT passed into or reused by isNewer. isNewer
+            //   The named binding keeps the allocation to exactly one
+            //   ParsedVersion(currentVersion) call within this scope. Do not
+            //   inline it as `ParsedVersion(currentVersion).isPrerelease`
+            //   directly in the if condition — that would make the
+            //   single-evaluation guarantee implicit rather than structural,
+            //   and obscures intent if the condition is later extended.
+            //   parsedCurrent is NOT passed into or reused by isNewer: isNewer
             //   takes raw String arguments and calls ParsedVersion(current)
             //   internally on its own.
             //
             // parsedRelease — read by the guard (!parsedRelease.isPrerelease).
-            //   Used only here; NOT passed into or reused by isNewer. isNewer
-            //   calls ParsedVersion(candidate) internally on its own.
+            //   Same rationale as parsedCurrent. NOT passed into or reused by
+            //   isNewer, which calls ParsedVersion(candidate) internally.
             //
             // Neither local is shared with the isNewer fallthrough path, which
             // re-parses both strings independently. There is no API to inject
             // pre-parsed values into isNewer, and adding one would complicate
             // its public signature for a negligible gain. Do not remove these
             // locals on the grounds that isNewer "already parses them anyway" —
-            // they exist to avoid a second ParsedVersion allocation inside the
-            // same if condition on the guard-fires path.
+            // they exist to keep each ParsedVersion allocation explicit and
+            // singular on the guard-fires path.
             let parsedCurrent = ParsedVersion(currentVersion)
             let parsedRelease = ParsedVersion(release.tagName)
 
