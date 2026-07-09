@@ -86,7 +86,7 @@ extension AppUpdater {
     ///
     /// 1. If a zip already exists at the fixed zip URL, moves directly to `.ready`
     ///    without re-downloading.
-    /// 2. If the release has no matching asset or no checksum sidecar URL,
+    /// 2. If the release has no matching asset or no signature sidecar URL,
     ///    logs a warning and returns — no phase change.
     /// 3. Otherwise advances to `.available` and starts a background download.
     public func handle(_ release: AvailableRelease, state: any UpdateStateProviding) async {
@@ -175,14 +175,14 @@ extension AppUpdater {
                 return
             }
 
-            // ── 2. Asset or checksum sidecar absent? ───────────────────────────────────────────────────────────────────────
+            // ── 2. Asset or signature sidecar absent? ───────────────────────────────────────────────────────────────────────
             let wantedAsset = assetName(release.tagName)
             guard let asset = release.assets.first(where: { $0.name == wantedAsset }) else {
                 appUpdaterLogger.warning("release \(release.tagName, privacy: .public) has no asset named \(wantedAsset, privacy: .public) — skipping download")
                 return
             }
-            guard let checksumURL = release.checksumURL else {
-                appUpdaterLogger.warning("release \(release.tagName, privacy: .public) has no checksum sidecar — skipping download")
+            guard let signatureURL = release.signatureURL else {
+                appUpdaterLogger.warning("release \(release.tagName, privacy: .public) has no signature sidecar — skipping download")
                 return
             }
 
@@ -219,7 +219,7 @@ extension AppUpdater {
             Task(name: "AppUpdater.download") {
                 await self.downloadUpdate(
                     from: downloadURL,
-                    checksumURL: checksumURL,
+                    signatureURL: signatureURL,
                     version: tagName,
                     destination: zipURL,
                     state: state

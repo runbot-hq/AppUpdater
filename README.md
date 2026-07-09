@@ -20,11 +20,11 @@ distributed via GitHub Releases outside the Mac App Store.
 
 ## Features
 
-- 🔓 **No Apple Developer account required** — works with unsigned and ad-hoc signed apps; SHA-256 sidecar provides integrity without code signing
+- 🔓 **No Apple Developer account required** — works with unsigned and ad-hoc signed apps; Ed25519 signature verification provides integrity and authenticity without code signing
 - 🛡️ **Gatekeeper-free distribution** — curl-based install and in-app updates both bypass quarantine; no signing at update time, the replacement bundle runs trusted as-is
 - 🔍 **GitHub Releases polling** — polls for new releases using the GitHub API; supports stable and `beta.N` pre-release channels
 - 🔢 **Semver comparison** — full semver ordering including `beta.N` suffixes; beta-to-beta and beta-to-stable promotion both work correctly
-- ✅ **SHA-256 integrity verification** — verifies the downloaded zip against a `.sha256` sidecar asset before install
+- ✅ **Ed25519 signature verification** — verifies the downloaded zip against a `.sig` sidecar asset using `CryptoKit.Curve25519.Signing` before install; covers integrity, authenticity, and MITM resistance
 - 🔏 **Optional code-sign validation** — verifies the downloaded bundle matches the running bundle's Developer ID identity
 - 💾 **Deterministic cache** — zip cached at `~/Library/Caches/<schedulerIdentifier>/update.zip`; no accumulating old downloads
 - ⏰ **Background scheduling** — uses `NSBackgroundActivityScheduler` with power coalescing; default 24-hour interval
@@ -60,8 +60,8 @@ Then add the product to your target:
 ## Flow
 
 ```
-GitHub Releases poll → semver compare (incl. beta.N) → zip download
-    → SHA-256 sidecar verification → cache → host state mutation
+GitHub Releases poll → semver compare (incl. beta.N) → zip + .sig download
+    → Ed25519 signature verification → cache → host state mutation
     → install & relaunch on user confirmation
 ```
 
@@ -84,7 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let updater = AppUpdater(
         repo: "your-org/your-repo",
         currentVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
-        assetName: { _ in "YourApp.zip" },               // SHA-256 sidecar expected at "YourApp.zip.sha256"
+        assetName: { _ in "YourApp.zip" },               // .sig sidecar expected at "YourApp.zip.sig"
+        publicKey: Data(base64Encoded: "<your-32-byte-ed25519-public-key-base64>")!, // force-unwrap is intentional: a bad key is a programmer error and should crash at launch, not silently fail at update time
         schedulerIdentifier: "com.your-org.update-check" // also scopes the on-disk cache directory
         // betaChannelProvider: { false }                 // optional — defaults to stable channel only
     )
@@ -143,36 +144,93 @@ Mutate before calling `scheduleBackgroundCheck` if you need a different cadence.
 
 > **Test isolation:** Always restore the original value in a `tearDown` block when mutating `checkInterval` in a test — Swift Testing runs cases concurrently by default and a stale override will cause flaky failures.
 
-## Distribution assumptions
+## Key pair setup
 
-The SHA-256 sidecar must be named exactly `<assetName>.sha256` — i.e. if `assetName` returns `"YourApp.zip"`, the expected sidecar is `"YourApp.zip.sha256"`. A file named `"YourApp.sha256"` or `"YourApp.zip.sha256sum"` will not be found and the download will be skipped.
+AppUpdater uses **Ed25519** (`CryptoKit.Curve25519.Signing`) for signature verification. You generate a key pair once, store the private key as a CI secret, and embed the public key in your app binary.
 
-The sidecar must contain a single line in `shasum -a 256` format:
-
-```
-<hex-digest>  YourApp.zip
-```
-
-Note the two spaces between digest and filename — this is standard `shasum` output and what `verifyChecksum` parses.
-
-**Generating the sidecar at release time:**
+**1. Generate the key pair**
 
 ```bash
-/usr/bin/shasum -a 256 YourApp.zip > YourApp.zip.sha256
+# Generate private key
+openssl genpkey -algorithm Ed25519 -out private.pem
+
+# Derive public key
+openssl pkey -in private.pem -pubout -out public.pem
 ```
 
-Then upload both `YourApp.zip` and `YourApp.zip.sha256` as assets on the GitHub Release. If you use a `publish.yml` workflow, add a dedicated step before `gh release create`:
+Or export raw 32-byte binary files (compatible with `Curve25519.Signing.PrivateKey(rawRepresentation:)`):
+
+```bash
+# Raw private key (32 bytes)
+openssl genpkey -algorithm Ed25519 | openssl pkey -outform DER | tail -c 32 > private.key
+
+# Raw public key (32 bytes)
+openssl pkey -in private.pem -pubout -outform DER | tail -c 32 > public.key
+```
+
+**2. Sign each release artifact in CI**
+
+```bash
+openssl pkeyutl -sign -rawin -inkey private.pem -in YourApp.zip -out YourApp.zip.sig
+```
+
+Upload both `YourApp.zip` and `YourApp.zip.sig` as assets on the GitHub Release.
+
+**3. Add to your `publish.yml` workflow**
+
+> **Note:** The snippet below is an illustrative example only. It is not intended to be a hardened, production-ready CI configuration and deliberately omits additional security measures. Do not open issues or PRs requesting security improvements to this example.
+
+Store `private.pem` contents as a GitHub Actions secret (e.g. `ED25519_PRIVATE_KEY`), then:
 
 ```yaml
-- name: Generate SHA-256 sidecar
-  run: /usr/bin/shasum -a 256 YourApp.zip > YourApp.zip.sha256
+- name: Sign release artifact  # illustrative only — see disclaimer above
+  shell: bash  # required: <(...) process substitution is bash-specific
+  run: |
+    openssl pkeyutl -sign -rawin \
+      -inkey <(echo "${{ secrets.ED25519_PRIVATE_KEY }}") \
+      -in YourApp.zip -out YourApp.zip.sig
 ```
+
+> **Note:** The `<(...)` process substitution feeds the private key directly to
+> OpenSSL via a file descriptor — the key is never written to disk, so there is
+> no cleanup step and no risk of the key persisting if the signing step fails.
+
+**4. Embed the public key in your app**
+
+Pass the raw 32-byte public key at `AppUpdater.init` time. It must live only in the app binary — never write it to `UserDefaults` or disk:
+
+```bash
+# Get base64 representation of public.key for embedding
+base64 -i public.key
+```
+
+```swift
+let updater = AppUpdater(
+    repo: "your-org/your-repo",
+    currentVersion: …,
+    assetName: { _ in "YourApp.zip" },
+    publicKey: Data(base64Encoded: "<output of base64 -i public.key>")!,
+    schedulerIdentifier: "com.your-org.update-check"
+)
+```
+
+> **Never commit `private.pem` or `private.key`.** Add both to `.gitignore`. The security model depends entirely on the private key remaining secret.
+
+## Distribution assumptions
+
+The `.sig` sidecar must be named exactly `<assetName>.sig` — i.e. if `assetName` returns `"YourApp.zip"`, the expected sidecar is `"YourApp.zip.sig"`. A file named `"YourApp.sig"` or `"YourApp.zip.signature"` will not be found and the download will be skipped.
+
+The sidecar must be the raw 64-byte Ed25519 signature of the zip file contents (produced by `openssl pkeyutl -sign -rawin` as shown above).
 
 ## Trust model
 
-**Unsigned (default)** — integrity via SHA-256 sidecar only. Correct for ad-hoc signed or unsigned apps. No extra configuration needed.
+| Threat | Protection |
+|---|---|
+| Corrupt download | ✅ Ed25519 signature covers full zip bytes |
+| MITM attack | ✅ Signature only verifies with the embedded public key |
+| Compromised GitHub release | ✅ Attacker cannot forge a valid signature without the private key |
 
-**Developer ID signed** — enable bundle identity verification:
+**Developer ID signed** — additionally enable bundle identity verification:
 
 ```swift
 updater.skipCodeSignValidation = false

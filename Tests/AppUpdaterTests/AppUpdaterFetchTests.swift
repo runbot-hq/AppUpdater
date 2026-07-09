@@ -37,6 +37,7 @@ struct AppUpdaterFetchTests {
             repo: "owner/repo",
             currentVersion: currentVersion,
             assetName: { _ in "App.zip" },
+            publicKey: dummyPublicKey,
             schedulerIdentifier: domain,
             betaChannelProvider: { betaChannel },
             releaseProvider: provider
@@ -54,6 +55,7 @@ struct AppUpdaterFetchTests {
             repo: "owner/repo",
             currentVersion: "1.0.0",
             assetName: { _ in "App.zip" },
+            publicKey: dummyPublicKey,
             schedulerIdentifier: domain,
             betaChannelProvider: betaChannelProvider,
             releaseProvider: provider
@@ -62,7 +64,7 @@ struct AppUpdaterFetchTests {
     }
 
     /// Builds an `AvailableRelease` with a matching `App.zip` asset **and** a
-    /// real `checksumURL` (pointing at a `.sha256` sidecar).
+    /// real `signatureURL` (pointing at a `.sig` sidecar).
     private func makeRelease(
         tagName: String = "v2.0.0"
     ) throws -> AvailableRelease {
@@ -71,14 +73,14 @@ struct AppUpdaterFetchTests {
             name: "App.zip",
             browserDownloadURL: try #require(URL(string: "\(base)/App.zip"))
         )
-        let checksumAsset = ReleaseAsset(
-            name: "App.zip.sha256",
-            browserDownloadURL: try #require(URL(string: "\(base)/App.zip.sha256"))
+        let signatureAsset = ReleaseAsset(
+            name: "App.zip.sig",
+            browserDownloadURL: try #require(URL(string: "\(base)/App.zip.sig"))
         )
         return AvailableRelease(
             tagName: tagName,
-            assets: [asset, checksumAsset],
-            checksumURL: checksumAsset.browserDownloadURL
+            assets: [asset, signatureAsset],
+            signatureURL: signatureAsset.browserDownloadURL
         )
     }
 

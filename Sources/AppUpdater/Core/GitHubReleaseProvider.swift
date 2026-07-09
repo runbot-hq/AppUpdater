@@ -6,7 +6,7 @@ import Foundation
 
 /// The production `ReleaseProvider` — owns the full GitHub Releases API fetch
 /// pipeline: request building, network I/O, JSON decode, channel filtering,
-/// and checksum URL assembly.
+/// and signature URL assembly.
 ///
 /// Zero stored state; conforms to `Sendable` automatically as a value type
 /// with no mutable stored properties.
@@ -101,8 +101,8 @@ public struct GitHubReleaseProvider: ReleaseProvider {
                 // Fetch succeeded but no release matched the channel — not a failure.
                 return .fetched(nil)
             }
-            let checksumAssetName = assetName(latest.tagName) + ".sha256"
-            let checksumAsset = latest.assets.first(where: { $0.name == checksumAssetName })
+            let signatureAssetName = assetName(latest.tagName) + ".sig"
+            let signatureAsset = latest.assets.first(where: { $0.name == signatureAssetName })
             // tagName is passed through verbatim from Release.tagName with no
             // normalisation (no v-stripping, no lowercasing, no trimming).
             // AvailableRelease has no init logic that transforms it — it is a
@@ -115,7 +115,7 @@ public struct GitHubReleaseProvider: ReleaseProvider {
             return .fetched(AvailableRelease(
                 tagName: latest.tagName,
                 assets: latest.assets,
-                checksumURL: checksumAsset?.browserDownloadURL
+                signatureURL: signatureAsset?.browserDownloadURL
             ))
         }
     }

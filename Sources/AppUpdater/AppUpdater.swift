@@ -8,7 +8,7 @@ import AppKit
 // MARK: - AppUpdater
 
 /// Drives the in-app auto-update flow: GitHub Releases poll → semver compare →
-/// zip download → SHA-256 verification → host-state mutation → install &
+/// zip download → Ed25519 signature verification → host-state mutation → install &
 /// relaunch on user confirmation.
 ///
 /// `AppUpdater` is a configurable `@MainActor` class carrying no host-specific
@@ -21,7 +21,7 @@ import AppKit
 /// The class is `@MainActor`, so `isInstalling` and the scheduler reference are
 /// race-free without extra locking. The blocking work runs off the main thread
 /// regardless: `URLSession` downloads suspend rather than block, checksum
-/// verification runs in the `@concurrent` `verifyChecksum` free function, and
+/// verification runs in the `@concurrent` `verifySignature` free function, and
 /// subprocess launches run in the `@concurrent` `runCommand` helper.
 ///
 /// ## Typical usage
@@ -31,6 +31,7 @@ import AppKit
 ///     repo: "your-org/your-repo",
 ///     currentVersion: "1.2.3",
 ///     assetName: { _ in "YourApp.zip" },
+///     publicKey: Data(base64Encoded: "<your-32-byte-ed25519-public-key-base64>")!,
 ///     schedulerIdentifier: "com.your-org.update-check",
 ///     betaChannelProvider: { UserDefaults.standard.bool(forKey: "betaChannel") }
 /// )
@@ -150,11 +151,33 @@ public final class AppUpdater {
 
     // MARK: - Trust model
 
+    /// Raw 32-byte Ed25519 public key used to verify the `.sig` sidecar
+    /// downloaded alongside each release zip.
+    ///
+    /// Must match the private key used to produce the `.sig` files in GitHub
+    /// Releases. Injected at init time so the library carries no hard-coded key.
+    ///
+    /// Stored as `Data` rather than `Curve25519.Signing.PublicKey` intentionally:
+    /// this keeps the public API free of CryptoKit types and avoids a throwing
+    /// or failable `init`. The `precondition(publicKey.count == 32)` at init
+    /// catches misconfiguration immediately; parsing happens once per download
+    /// cycle — `Curve25519.Signing.PublicKey(rawRepresentation:)` is O(1) and
+    /// the re-parse cost is negligible regardless of `checkInterval`.
+    /// (Storing a parsed `Curve25519.Signing.PublicKey` instead would require
+    /// either a throwing `init` or a force-try, both worse than the current
+    /// design for a library entry point.)
+    ///
+    /// Access level is `internal` (not `private`) deliberately: `AppUpdater+Download.swift`
+    /// reads this property in a cross-file extension of the same type. `private`
+    /// would break that access. It is not `public` — external consumers have no
+    /// legitimate reason to read the stored key back out; they injected it at init.
+    let publicKey: Data
+
     /// When `false`, `installAndRelaunch` verifies that the running bundle and
     /// the downloaded bundle share the same `codesign` `Authority=` identity.
     ///
-    /// Default `true` — RunBot's unsigned distribution model relies solely on
-    /// the SHA-256 sidecar for integrity.
+    /// Default `true` — RunBot's unsigned distribution model skips code-sign
+    /// validation; integrity is guaranteed by Ed25519 signature verification.
     public var skipCodeSignValidation: Bool = true
 
     // MARK: - Runtime flags
@@ -189,6 +212,8 @@ public final class AppUpdater {
     ///   - repo: `"owner/name"` GitHub repository slug.
     ///   - currentVersion: The running app's version string.
     ///   - assetName: Maps a tag name to the expected zip asset filename.
+    ///   - publicKey: Raw 32-byte Ed25519 public key used to verify `.sig`
+    ///     sidecar files. Must match the private key used when signing releases.
     ///   - schedulerIdentifier: Reverse-DNS scheduler id / cache directory name.
     ///     Must not be empty and must not contain `"/"`.
     ///   - betaChannelProvider: Returns the host's beta-channel preference.
@@ -201,6 +226,7 @@ public final class AppUpdater {
         repo: String,
         currentVersion: String,
         assetName: @escaping @Sendable (String) -> String,
+        publicKey: Data,
         schedulerIdentifier: String,
         betaChannelProvider: @escaping @MainActor () -> Bool = { false },
         checkInterval: TimeInterval = {
@@ -218,9 +244,35 @@ public final class AppUpdater {
             !schedulerIdentifier.contains("/"),
             "AppUpdater: schedulerIdentifier must not contain '/' — used as a cache directory name component"
         )
+        // `precondition` (not `assert`) is intentional: a wrong-length key is a
+        // programmer error that makes the updater non-functional from the start.
+        // Crashing at init in both Debug and Release surfaces misconfiguration
+        // immediately rather than allowing the app to ship and silently skip every
+        // update 24 h later. `assert` would hide this in Release builds.
+        // The caller is responsible for passing a valid 32-byte raw key; the
+        // README example uses `Data(base64Encoded:)!` which will crash before
+        // this line if the base64 string is malformed — both crashes are
+        // intentional fail-fast behaviour for a mis-integrated library.
+        //
+        // NOTE: this precondition checks byte-length only, not curve-point
+        // validity. A 32-byte sequence that is not a valid Ed25519 point will
+        // pass this check and be caught later by
+        // `Curve25519.Signing.PublicKey(rawRepresentation:)` in verifySignature,
+        // throwing `.badServerResponse` at download time. `.badServerResponse`
+        // is the correct error for key-parse failure: it signals a configuration
+        // or server-setup problem, intentionally distinct from
+        // `.cannotDecodeContentData` which means the signature itself is wrong.
+        // Full curve-point validation at init would require a throwing or
+        // failable init, adding complexity for a misconfiguration that is caught
+        // before any update is ever applied. This is a deliberate trade-off,
+        // not an oversight.
+        // (See also the `publicKey` property doc-comment above for the rationale
+        // on storing as `Data` and parsing per-download.)
+        precondition(publicKey.count == 32, "AppUpdater: publicKey must be exactly 32 bytes (raw Ed25519 public key) — see README Key pair setup for how to derive this from public.pem")
         self.repo = repo
         self.currentVersion = currentVersion
         self.assetName = assetName
+        self.publicKey = publicKey
         self.schedulerIdentifier = schedulerIdentifier
         self.betaChannelProvider = betaChannelProvider
         self.checkInterval = checkInterval

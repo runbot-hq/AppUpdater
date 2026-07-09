@@ -1,6 +1,5 @@
 // AppUpdater+Download.swift
 // AppUpdater
-import CryptoKit
 import Foundation
 
 // MARK: - Download
@@ -8,13 +7,13 @@ import Foundation
 /// Download, checksum verification, and local cache management for AppUpdater.
 extension AppUpdater {
 
-    /// Downloads the zip and its SHA-256 sidecar in parallel, verifies
+    /// Downloads the zip and its Ed25519 `.sig` sidecar in parallel, verifies
     /// integrity, then caches the verified zip at `destination` and advances
     /// host state.
     ///
     /// State transitions:
     ///   `.available` → `.downloading` (on entry)
-    ///   `.downloading` → `.ready`     (checksum-verified success)
+    ///   `.downloading` → `.ready`     (signature-verified success)
     ///   `.downloading` → `.failed`    (any error)
     ///
     /// ## destination is passed in by handle()
@@ -46,17 +45,17 @@ extension AppUpdater {
     /// body. Applying it here (inside the Task, on @MainActor) guarantees
     /// the transition is serialised correctly.
     ///
-    /// ## checksumURL is non-optional by design
+    /// ## signatureURL is non-optional by design
     ///
-    /// `handle()` guards `release.checksumURL != nil` before spawning this Task
-    /// — a nil checksumURL never reaches this function. The parameter is `URL`
+    /// `handle()` guards `release.signatureURL != nil` before spawning this Task
+    /// — a nil signatureURL never reaches this function. The parameter is `URL`
     /// (non-optional) to make that invariant explicit at the type level and
     /// remove any unreachable nil-handling code (Principle 1: illegal states
     /// unrepresentable by construction).
     ///
     /// ## HTTPS enforcement
     ///
-    /// `checksumURL` and the zip `url` are decoded from the GitHub Releases API
+    /// `signatureURL` and the zip `url` are decoded from the GitHub Releases API
     /// JSON without an explicit `guard url.scheme == "https"` assertion.
     /// In practice, GitHub's API always returns `https://` asset URLs, and
     /// macOS App Transport Security (ATS) blocks non-HTTPS `URLSession` requests
@@ -70,7 +69,7 @@ extension AppUpdater {
     /// does not serve asset URLs over plain HTTP. The practical risk is zero.
     func downloadUpdate( // skipcq: SW-R1002 — reviewed; complexity acceptable for this download+verify flow
         from url: URL,
-        checksumURL: URL,
+        signatureURL: URL,
         version: String,
         destination: URL,
         state: any UpdateStateProviding
@@ -86,10 +85,10 @@ extension AppUpdater {
             defer { session.finishTasksAndInvalidate() }
 
             async let zipDownload = session.download(from: url)
-            async let checksumDownload = session.data(from: checksumURL)
+            async let signatureDownload = session.data(from: signatureURL)
             let (downloadedURL, zipResponse) = try await zipDownload
             tempURL = downloadedURL
-            let (checksumData, checksumResponse) = try await checksumDownload
+            let (signatureData, signatureResponse) = try await signatureDownload
 
             // ── Validate zip HTTP status ─────────────────────────────────────
             guard let zipHTTP = zipResponse as? HTTPURLResponse else {
@@ -100,27 +99,54 @@ extension AppUpdater {
                 throw URLError(.badServerResponse)
             }
 
-            // ── Validate checksum sidecar HTTP status ────────────────────────
-            guard let checksumHTTP = checksumResponse as? HTTPURLResponse else {
+            // ── Validate signature sidecar HTTP status ────────────────────────
+            guard let signatureHTTP = signatureResponse as? HTTPURLResponse else {
                 throw URLError(.badServerResponse)
             }
-            guard checksumHTTP.statusCode == 200 else {
-                appUpdaterLogger.error("checksum sidecar returned HTTP \(checksumHTTP.statusCode, privacy: .public) — release may have been published without a .sha256 file")
+            guard signatureHTTP.statusCode == 200 else {
+                appUpdaterLogger.error("signature sidecar returned HTTP \(signatureHTTP.statusCode, privacy: .public) — release may have been published without a .sig file")
                 throw URLError(.badServerResponse)
             }
 
-            // ── Parse and validate the expected hex string ───────────────────
-            let rawChecksum = String(bytes: checksumData, encoding: .utf8) ?? ""
-            let expectedHex = rawChecksum
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .components(separatedBy: .whitespaces).first ?? ""
-
-            guard !expectedHex.isEmpty else {
-                appUpdaterLogger.error("checksum sidecar returned HTTP 200 but body was empty or whitespace-only")
+            // Ed25519 signatures are exactly 64 bytes. Reject grossly oversized
+            // sidecars before passing to CryptoKit. Note: `session.data(from:)`
+            // has already buffered the full response by this point — this guard
+            // is post-hoc and does not prevent the allocation. Its purpose is to
+            // catch and reject the payload early rather than passing a large
+            // buffer into CryptoKit. A true pre-buffer byte-limit would require
+            // a URLSession delegate; that complexity is not justified here because
+            // the sidecar URL comes from the GitHub Releases API (ATS-enforced
+            // HTTPS) and the threat model does not include adversarial GitHub
+            // asset uploads. Ceiling is 128 (2× the expected size) as a
+            // defensive upper bound. It is not tightened to 64 because this guard
+            // is a memory-safety net, not a format validator — exact-64
+            // enforcement happens inside CryptoKit's isValidSignature.
+            // Note: a base64-encoded .sig (88 bytes) would also pass this guard;
+            // callers must ensure the sidecar is raw binary, as documented in
+            // README § Distribution assumptions.
+            guard signatureData.count <= 128 else {
+                appUpdaterLogger.error("signature sidecar is \(signatureData.count, privacy: .public) bytes — expected 64; rejecting oversized payload")
                 throw URLError(.cannotDecodeContentData)
             }
+            if signatureData.count != 64 {
+                appUpdaterLogger.warning(
+                    """
+                    signature sidecar is \(signatureData.count, privacy: .public) bytes, not 64 — \
+                    this may be a base64-encoded .sig instead of raw binary; \
+                    see README § Distribution assumptions
+                    """
+                )
+            }
 
-            try await verifyChecksum(zipURL: downloadedURL, expectedHex: expectedHex)
+            // ── Verify Ed25519 signature ──────────────────────────
+            // signatureData is the raw binary .sig sidecar — no hex decoding.
+            // An empty sidecar (zero bytes) will fail isValidSignature and
+            // surface as .failed, which is correct.
+            try await verifySignature(
+                zipURL: downloadedURL,
+                signatureBytes: signatureData,
+                publicKeyBytes: publicKey
+            )
 
             // ── Move verified zip to fixed destination ───────────────────────
             // destination is the URL snapshotted in handle() — same path used

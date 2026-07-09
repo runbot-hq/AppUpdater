@@ -28,8 +28,8 @@ public struct AvailableRelease: Sendable {
     public let tagName: String
     /// The list of binary assets attached to this release.
     public let assets: [ReleaseAsset]
-    /// The URL of the SHA-256 checksum sidecar asset, or `nil` if absent.
-    public let checksumURL: URL?
+    /// The URL of the Ed25519 signature sidecar asset (`.sig`), or `nil` if absent.
+    public let signatureURL: URL?
 }
 
 // MARK: - UpdateCheckResult
