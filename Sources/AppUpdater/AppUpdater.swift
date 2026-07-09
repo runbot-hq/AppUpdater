@@ -249,6 +249,15 @@ public final class AppUpdater {
         // README example uses `Data(base64Encoded:)!` which will crash before
         // this line if the base64 string is malformed — both crashes are
         // intentional fail-fast behaviour for a mis-integrated library.
+        //
+        // NOTE: this precondition checks byte-length only, not curve-point
+        // validity. A 32-byte sequence that is not a valid Ed25519 point will
+        // pass this check and be caught later by
+        // `Curve25519.Signing.PublicKey(rawRepresentation:)` in verifySignature,
+        // throwing `.badServerResponse` at download time. Full curve-point
+        // validation at init would require a throwing or failable init, which
+        // adds complexity for a misconfiguration that is caught before any update
+        // is ever applied. This is a deliberate trade-off, not an oversight.
         precondition(publicKey.count == 32, "AppUpdater: publicKey must be exactly 32 bytes (raw Ed25519 public key) — see README Key pair setup for how to derive this from public.pem")
         self.repo = repo
         self.currentVersion = currentVersion
