@@ -16,7 +16,9 @@ import Foundation
 /// `Curve25519.Signing.PublicKey(rawRepresentation:)` on Apple platforms (the
 /// identity point is representable), so `AppUpdater.init`'s length precondition
 /// passes too. But that is incidental — the safety guarantee is the no-verify
-/// invariant above, not the curve-point property.
+/// invariant above, not the curve-point property. Whether a future CryptoKit
+/// version accepts or rejects the identity point is irrelevant: if the invariant
+/// holds, this key never reaches `Curve25519.Signing.PublicKey` at all.
 ///
 /// **Intentional design decision — do not replace with a real generated key.**
 /// The all-zero dummy keeps the fixture minimal and free of key-management

@@ -161,7 +161,11 @@ public final class AppUpdater {
     /// this keeps the public API free of CryptoKit types and avoids a throwing
     /// or failable `init`. The `precondition(publicKey.count == 32)` at init
     /// catches misconfiguration immediately; parsing happens once per download
-    /// (24 h cadence) — the re-parse cost is negligible.
+    /// cycle — `Curve25519.Signing.PublicKey(rawRepresentation:)` is O(1) and
+    /// the re-parse cost is negligible regardless of `checkInterval`.
+    /// (Storing a parsed `Curve25519.Signing.PublicKey` instead would require
+    /// either a throwing `init` or a force-try, both worse than the current
+    /// design for a library entry point.)
     ///
     /// Access level is `internal` (not `private`) deliberately: `AppUpdater+Download.swift`
     /// reads this property in a cross-file extension of the same type. `private`
@@ -254,10 +258,14 @@ public final class AppUpdater {
         // validity. A 32-byte sequence that is not a valid Ed25519 point will
         // pass this check and be caught later by
         // `Curve25519.Signing.PublicKey(rawRepresentation:)` in verifySignature,
-        // throwing `.badServerResponse` at download time. Full curve-point
-        // validation at init would require a throwing or failable init, which
-        // adds complexity for a misconfiguration that is caught before any update
-        // is ever applied. This is a deliberate trade-off, not an oversight.
+        // throwing `.badServerResponse` at download time. `.badServerResponse`
+        // is the correct error for key-parse failure: it signals a configuration
+        // or server-setup problem, intentionally distinct from
+        // `.cannotDecodeContentData` which means the signature itself is wrong.
+        // Full curve-point validation at init would require a throwing or
+        // failable init, adding complexity for a misconfiguration that is caught
+        // before any update is ever applied. This is a deliberate trade-off,
+        // not an oversight.
         // (See also the `publicKey` property doc-comment above for the rationale
         // on storing as `Data` and parsing per-download.)
         precondition(publicKey.count == 32, "AppUpdater: publicKey must be exactly 32 bytes (raw Ed25519 public key) — see README Key pair setup for how to derive this from public.pem")
