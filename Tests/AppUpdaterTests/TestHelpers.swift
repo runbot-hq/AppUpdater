@@ -13,4 +13,11 @@ import Foundation
 /// signature-verification path must use the real test vectors in
 /// `AppUpdaterSignatureTests` — passing this key there would produce a
 /// key-parse success followed by a verification failure, which is misleading.
+///
+/// Why this is safe in the current suite: every test that uses `dummyPublicKey`
+/// stubs `releaseProvider` to return `.idle` or never calls `checkAndHandle` in
+/// a way that reaches `downloadUpdate`. No test path leads from `dummyPublicKey`
+/// to `verifySignature` — if one ever does, the test will fail with
+/// `.cannotDecodeContentData` (wrong-key verification failure), which is a
+/// loud, obvious red signal, not a silent false-pass.
 let dummyPublicKey = Data(repeating: 0, count: 32)

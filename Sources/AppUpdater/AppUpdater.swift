@@ -235,7 +235,16 @@ public final class AppUpdater {
             !schedulerIdentifier.contains("/"),
             "AppUpdater: schedulerIdentifier must not contain '/' — used as a cache directory name component"
         )
-        precondition(publicKey.count == 32, "AppUpdater: publicKey must be exactly 32 bytes (raw Ed25519 public key)")
+        // `precondition` (not `assert`) is intentional: a wrong-length key is a
+        // programmer error that makes the updater non-functional from the start.
+        // Crashing at init in both Debug and Release surfaces misconfiguration
+        // immediately rather than allowing the app to ship and silently skip every
+        // update 24 h later. `assert` would hide this in Release builds.
+        // The caller is responsible for passing a valid 32-byte raw key; the
+        // README example uses `Data(base64Encoded:)!` which will crash before
+        // this line if the base64 string is malformed — both crashes are
+        // intentional fail-fast behaviour for a mis-integrated library.
+        precondition(publicKey.count == 32, "AppUpdater: publicKey must be exactly 32 bytes (raw Ed25519 public key) — see README Key pair setup for how to derive this from public.pem")
         self.repo = repo
         self.currentVersion = currentVersion
         self.assetName = assetName
