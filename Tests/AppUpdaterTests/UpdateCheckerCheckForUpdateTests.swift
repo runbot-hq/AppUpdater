@@ -18,8 +18,6 @@ struct UpdateCheckerCheckForUpdateTests {
 
     // MARK: - Fixture helpers
 
-    /// Loads the JSON at `Fixtures/<name>.json` via `Bundle.module` and
-    /// decodes it as `[FixtureRelease]`.
     private func loadFixture(
         named name: String
     ) throws -> [FixtureRelease] {
@@ -31,8 +29,6 @@ struct UpdateCheckerCheckForUpdateTests {
         return try JSONDecoder().decode([FixtureRelease].self, from: data)
     }
 
-    /// Decodes the first entry in the fixture and builds an `AvailableRelease`
-    /// using `assetName` to find the checksum sidecar.
     private func firstRelease(
         fromFixture name: String,
         assetName: (String) -> String = { _ in "App.zip" }
@@ -48,7 +44,6 @@ struct UpdateCheckerCheckForUpdateTests {
         )
     }
 
-    /// Builds a minimal `AvailableRelease` with a custom tag and no assets.
     private func release(tag: String) -> AvailableRelease {
         AvailableRelease(tagName: tag, assets: [], checksumURL: nil)
     }
@@ -157,18 +152,7 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// Pins the interim buildRequest-nil fallback behaviour: a malformed repo
-    /// string causes `buildRequest` to return nil, which `fetchAndDecodeReleases`
-    /// maps to `.failure(.networkError(underlying: URLError(.badURL)))` in
-    /// release builds. This test exercises that exact `ReleaseFetchError` value
-    /// through `UpdateChecker.evaluate` so that when issue #38 changes the
-    /// return to `.configurationError`, this test fails loudly rather than
-    /// letting the misclassification silently persist.
-    ///
-    /// The test operates at the `evaluate` layer (not the `URLSession` layer)
-    /// because `GitHubReleaseProvider.fetchAndDecodeReleases` constructs a live
-    /// `URLSession` and cannot be injected; the evaluate path is the correct
-    /// seam to pin.
+    /// Pins the interim buildRequest-nil fallback behaviour.
     @Test func buildRequestNilFallback_networkError_badURL_roundTripsCorrectly() {
         let badURLError = URLError(.badURL)
         let result = UpdateChecker.evaluate(
@@ -190,8 +174,6 @@ struct UpdateCheckerCheckForUpdateTests {
 
     // MARK: - Malformed semver
 
-    /// A garbage `currentVersion` string with a nil-fetched release must not
-    /// crash — `evaluate` must return `.upToDate` (no release to offer).
     @Test func malformedCurrentVersion_fetchedNil_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(nil),
@@ -204,12 +186,8 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// A garbage `currentVersion` with a valid release tag must not crash.
-    /// `ParsedVersion` returns `nil` for non-semver input and `isNewer` treats
-    /// a nil current version as `0.0.0`, so any parseable release tag wins and
-    /// `evaluate` returns `.updateAvailable`. This pins that production
-    /// fallback; a deliberate change to return `.failed` instead would require
-    /// updating this test and `ParsedVersion` together.
+    /// `ParsedVersion` returns nil for non-semver input; `isNewer` treats it as
+    /// 0.0.0, so any parseable release tag wins and evaluate returns .updateAvailable.
     @Test func malformedCurrentVersion_withValidRelease_returnsUpdateAvailable() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "v2.0.0")),
@@ -222,10 +200,8 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// A garbage release `tagName` with a valid `currentVersion` must not crash.
-    /// `ParsedVersion` returns `nil` for the tag, so `isNewer` treats it as
-    /// `0.0.0` — which can never beat a real version — and `evaluate` returns
-    /// `.upToDate`.
+    /// A garbage release tagName — ParsedVersion treats it as 0.0.0, can never
+    /// beat a real version, so evaluate returns .upToDate.
     @Test func malformedReleaseTag_validCurrentVersion_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "not-a-version")),
@@ -290,19 +266,15 @@ struct UpdateCheckerCheckForUpdateTests {
     /// isNewer("v0.9.9", than: "v1.0.0-beta.1") is false (major 0 < 1),
     /// so without the channel-downgrade guard the result would be .upToDate
     /// and the user would be stranded forever. With the guard, .updateAvailable
-    /// is returned unconditionally because betaChannel == false && currentVersion
-    /// is a pre-release.
+    /// is returned because: betaChannel == false && currentVersion is a
+    /// pre-release && release.tagName is stable (all three conditions hold).
     ///
     /// ## Precondition: release(tag: "v0.9.9") is stable by construction
     ///
-    /// A reviewer may ask: "how do we know the offered release is stable and not
-    /// another beta?" The answer is that in production, `latestMatchingRelease`
-    /// filters to stable-only releases *before* calling `evaluate` when
-    /// `betaChannel == false`. By the time `evaluate` is reached, `release` is
-    /// guaranteed to be the best available stable candidate. This test exercises
-    /// `evaluate` in isolation using a hand-constructed stable tag to reflect
-    /// that invariant directly — it does not need to go through
-    /// `latestMatchingRelease` to be a valid regression test.
+    /// In production, `latestMatchingRelease` filters to stable-only before
+    /// calling `evaluate` when `betaChannel == false`, so this invariant already
+    /// holds at the call site. This test exercises `evaluate` in isolation using
+    /// a hand-constructed stable tag to reflect that invariant directly.
     @Test func betaOff_prereleaseCurrent_stableAvailable_returnsUpdateAvailable() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "v0.9.9")),
@@ -318,10 +290,7 @@ struct UpdateCheckerCheckForUpdateTests {
 
     /// Confirms the channel-downgrade guard does NOT fire when betaChannel == true.
     ///
-    /// User is on v1.0.0-beta.1 with beta enabled. Latest is v0.9.9 (stable,
-    /// which would only be returned by latestMatchingRelease if no beta exists,
-    /// but we test evaluate in isolation). isNewer("v0.9.9", than: "v1.0.0-beta.1")
-    /// is false, so .upToDate is the correct result — the guard must not fire.
+    /// isNewer("v0.9.9", than: "v1.0.0-beta.1") is false, so .upToDate is correct.
     @Test func betaOn_prereleaseCurrent_olderStableAvailable_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "v0.9.9")),
@@ -336,9 +305,8 @@ struct UpdateCheckerCheckForUpdateTests {
 
     /// Confirms the channel-downgrade guard does NOT fire for a stable currentVersion.
     ///
-    /// User is on v1.0.0 stable with beta off. Latest stable is v0.9.9.
-    /// isNewer returns false — .upToDate is correct. The guard checks
-    /// isPrerelease first, so a stable currentVersion never triggers it.
+    /// The guard checks isPrerelease(currentVersion) first; a stable currentVersion
+    /// never triggers it.
     @Test func betaOff_stableCurrent_olderStableAvailable_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "v0.9.9")),
@@ -351,11 +319,9 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// Pins the guard-ordering invariant: `guard let release else { return .upToDate }`
-    /// fires *before* the channel-downgrade check, so a user on a pre-release
-    /// with beta off gets `.upToDate` when there are no stable releases at all
-    /// (nothing to offer). If the guards are ever reordered, this test fails
-    /// loudly rather than silently returning `.updateAvailable(nil)` or crashing.
+    /// Pins the guard-ordering invariant: `guard let release` fires before the
+    /// channel-downgrade check. If the guards were swapped, this test would
+    /// catch it by returning .updateAvailable(nil) or crashing instead.
     @Test func betaOff_prereleaseCurrent_noStableAvailable_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(nil),
@@ -364,6 +330,28 @@ struct UpdateCheckerCheckForUpdateTests {
         )
         guard case .upToDate = result else {
             Issue.record("Expected .upToDate when betaChannel=false, prerelease current, and no stable release available, got \(result)")
+            return
+        }
+    }
+
+    /// Confirms evaluate is self-defending against inconsistent caller input.
+    ///
+    /// If a caller bypasses GitHubReleaseProvider and passes betaChannel: false
+    /// alongside a pre-release candidate, the channel-downgrade guard must NOT
+    /// fire — the pre-release must not be offered as a "stable downgrade".
+    ///
+    /// Without the third condition (!ParsedVersion(release.tagName).isPrerelease)
+    /// in the guard, this call would incorrectly return .updateAvailable(v2.0.0-beta.2).
+    /// With it, control falls through to isNewer, which correctly returns .upToDate
+    /// (v2.0.0-beta.2 is not newer than v2.0.0-beta.3).
+    @Test func betaOff_prereleaseCurrent_prereleaseCandidateSlipsThrough_returnsUpToDate() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(release(tag: "v2.0.0-beta.2")),
+            currentVersion: "v2.0.0-beta.3",
+            betaChannel: false
+        )
+        guard case .upToDate = result else {
+            Issue.record("Expected .upToDate when candidate is itself a pre-release (downgrade guard must not fire), got \(result)")
             return
         }
     }
