@@ -122,6 +122,15 @@ extension AppUpdater {
                 appUpdaterLogger.error("signature sidecar is \(signatureData.count, privacy: .public) bytes — expected 64; rejecting oversized payload")
                 throw URLError(.cannotDecodeContentData)
             }
+            if signatureData.count != 64 {
+                appUpdaterLogger.warning(
+                    """
+                    signature sidecar is \(signatureData.count, privacy: .public) bytes, not 64 — \
+                    this may be a base64-encoded .sig instead of raw binary; \
+                    see README § Distribution setup
+                    """
+                )
+            }
 
             // ── Verify Ed25519 signature ──────────────────────────
             // signatureData is the raw binary .sig sidecar — no hex decoding.

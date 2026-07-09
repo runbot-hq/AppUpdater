@@ -185,10 +185,14 @@ Store `private.pem` contents as a GitHub Actions secret (e.g. `ED25519_PRIVATE_K
 ```yaml
 - name: Sign release artifact  # illustrative only — see disclaimer above
   run: |
-    echo "${{ secrets.ED25519_PRIVATE_KEY }}" > private.pem
-    openssl pkeyutl -sign -rawin -inkey private.pem -in YourApp.zip -out YourApp.zip.sig
-    rm private.pem
+    openssl pkeyutl -sign -rawin \
+      -inkey <(echo "${{ secrets.ED25519_PRIVATE_KEY }}") \
+      -in YourApp.zip -out YourApp.zip.sig
 ```
+
+> **Note:** The `<(...)` process substitution feeds the private key directly to
+> OpenSSL via a file descriptor — the key is never written to disk, so there is
+> no cleanup step and no risk of the key persisting if the signing step fails.
 
 **4. Embed the public key in your app**
 
