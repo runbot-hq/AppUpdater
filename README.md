@@ -1,4 +1,4 @@
-<![CDATA[<img width="240" alt="img" src="icon_masked2.png">
+<img width="240" alt="img" src="icon_masked2.png">
 
 # AppUpdater
 
@@ -269,4 +269,3 @@ A few notes :
 - **Sparkle** remains the gold standard for EdDSA authenticity, having shipped EdDSA (Ed25519) as its primary signature scheme since Sparkle 2, replacing the older DSA approach.
 - The original AppUpdater: https://github.com/mxcl/AppUpdater
 - hybrid Appupdater for macos and ios that supports appstore and github releases: https://github.com/TopScrech/AutoUpdate
-]]>
