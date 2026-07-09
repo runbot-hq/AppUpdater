@@ -37,6 +37,7 @@ struct AppUpdaterFetchTests {
             repo: "owner/repo",
             currentVersion: currentVersion,
             assetName: { _ in "App.zip" },
+            publicKey: dummyPublicKey,
             schedulerIdentifier: domain,
             betaChannelProvider: { betaChannel },
             releaseProvider: provider
@@ -54,6 +55,7 @@ struct AppUpdaterFetchTests {
             repo: "owner/repo",
             currentVersion: "1.0.0",
             assetName: { _ in "App.zip" },
+            publicKey: dummyPublicKey,
             schedulerIdentifier: domain,
             betaChannelProvider: betaChannelProvider,
             releaseProvider: provider

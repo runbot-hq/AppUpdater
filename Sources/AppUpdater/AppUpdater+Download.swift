@@ -109,18 +109,15 @@ extension AppUpdater {
                 throw URLError(.badServerResponse)
             }
 
-            // ── Parse and validate the expected hex string ───────────────────
-            let rawSignature = String(bytes: signatureData, encoding: .utf8) ?? ""
-            let expectedHex = rawSignature
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .components(separatedBy: .whitespaces).first ?? ""
-
-            guard !expectedHex.isEmpty else {
-                appUpdaterLogger.error("signature sidecar returned HTTP 200 but body was empty or whitespace-only")
-                throw URLError(.cannotDecodeContentData)
-            }
-
-            try await verifyChecksum(zipURL: downloadedURL, expectedHex: expectedHex)
+            // ── Verify Ed25519 signature ──────────────────────────
+            // signatureData is the raw binary .sig sidecar — no hex decoding.
+            // An empty sidecar (zero bytes) will fail isValidSignature and
+            // surface as .failed, which is correct.
+            try await verifySignature(
+                zipURL: downloadedURL,
+                signatureBytes: signatureData,
+                publicKeyBytes: publicKey
+            )
 
             // ── Move verified zip to fixed destination ───────────────────────
             // destination is the URL snapshotted in handle() — same path used

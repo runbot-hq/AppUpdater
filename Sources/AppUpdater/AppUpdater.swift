@@ -8,7 +8,7 @@ import AppKit
 // MARK: - AppUpdater
 
 /// Drives the in-app auto-update flow: GitHub Releases poll → semver compare →
-/// zip download → SHA-256 verification → host-state mutation → install &
+/// zip download → Ed25519 signature verification → host-state mutation → install &
 /// relaunch on user confirmation.
 ///
 /// `AppUpdater` is a configurable `@MainActor` class carrying no host-specific
@@ -21,7 +21,7 @@ import AppKit
 /// The class is `@MainActor`, so `isInstalling` and the scheduler reference are
 /// race-free without extra locking. The blocking work runs off the main thread
 /// regardless: `URLSession` downloads suspend rather than block, checksum
-/// verification runs in the `@concurrent` `verifyChecksum` free function, and
+/// verification runs in the `@concurrent` `verifySignature` free function, and
 /// subprocess launches run in the `@concurrent` `runCommand` helper.
 ///
 /// ## Typical usage
@@ -150,11 +150,18 @@ public final class AppUpdater {
 
     // MARK: - Trust model
 
+    /// Raw 32-byte Ed25519 public key used to verify the `.sig` sidecar
+    /// downloaded alongside each release zip.
+    ///
+    /// Must match the private key used to produce the `.sig` files in GitHub
+    /// Releases. Injected at init time so the library carries no hard-coded key.
+    let publicKey: Data
+
     /// When `false`, `installAndRelaunch` verifies that the running bundle and
     /// the downloaded bundle share the same `codesign` `Authority=` identity.
     ///
-    /// Default `true` — RunBot's unsigned distribution model relies solely on
-    /// the SHA-256 sidecar for integrity.
+    /// Default `true` — RunBot's unsigned distribution model skips code-sign
+    /// validation; integrity is guaranteed by Ed25519 signature verification.
     public var skipCodeSignValidation: Bool = true
 
     // MARK: - Runtime flags
@@ -189,6 +196,8 @@ public final class AppUpdater {
     ///   - repo: `"owner/name"` GitHub repository slug.
     ///   - currentVersion: The running app's version string.
     ///   - assetName: Maps a tag name to the expected zip asset filename.
+    ///   - publicKey: Raw 32-byte Ed25519 public key used to verify `.sig`
+    ///     sidecar files. Must match the private key used when signing releases.
     ///   - schedulerIdentifier: Reverse-DNS scheduler id / cache directory name.
     ///     Must not be empty and must not contain `"/"`.
     ///   - betaChannelProvider: Returns the host's beta-channel preference.
@@ -201,6 +210,7 @@ public final class AppUpdater {
         repo: String,
         currentVersion: String,
         assetName: @escaping @Sendable (String) -> String,
+        publicKey: Data,
         schedulerIdentifier: String,
         betaChannelProvider: @escaping @MainActor () -> Bool = { false },
         checkInterval: TimeInterval = {
@@ -218,9 +228,11 @@ public final class AppUpdater {
             !schedulerIdentifier.contains("/"),
             "AppUpdater: schedulerIdentifier must not contain '/' — used as a cache directory name component"
         )
+        precondition(publicKey.count == 32, "AppUpdater: publicKey must be exactly 32 bytes (raw Ed25519 public key)")
         self.repo = repo
         self.currentVersion = currentVersion
         self.assetName = assetName
+        self.publicKey = publicKey
         self.schedulerIdentifier = schedulerIdentifier
         self.betaChannelProvider = betaChannelProvider
         self.checkInterval = checkInterval

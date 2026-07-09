@@ -27,6 +27,7 @@ struct AppUpdaterCheckForUpdateTests {
             repo: "example/repo",
             currentVersion: currentVersion,
             assetName: { _ in "RunBot.zip" },
+            publicKey: dummyPublicKey,
             schedulerIdentifier: domain,
             betaChannelProvider: betaChannelProvider,
             releaseProvider: provider

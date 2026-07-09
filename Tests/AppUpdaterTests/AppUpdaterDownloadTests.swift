@@ -35,6 +35,7 @@ struct AppUpdaterDownloadTests {
             repo: "owner/repo",
             currentVersion: currentVersion,
             assetName: assetName,
+            publicKey: dummyPublicKey,
             schedulerIdentifier: domain,
             betaChannelProvider: { false }
         )

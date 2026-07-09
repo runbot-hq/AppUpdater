@@ -24,6 +24,7 @@ import Testing
             repo: "owner/repo",
             currentVersion: "1.0.0",
             assetName: { _ in "App.zip" },
+            publicKey: dummyPublicKey,
             schedulerIdentifier: "com.test.defaults"
         )
     }
@@ -42,6 +43,7 @@ import Testing
             repo: "owner/repo",
             currentVersion: "1.0.0",
             assetName: { _ in "App.zip" },
+            publicKey: dummyPublicKey,
             schedulerIdentifier: "com.test.custom-interval",
             checkInterval: 300
         )
