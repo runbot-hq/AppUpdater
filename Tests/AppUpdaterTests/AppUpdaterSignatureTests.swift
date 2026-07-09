@@ -31,11 +31,27 @@ struct AppUpdaterSignatureTests {
     private let publicKeyHex    = "e93518e72ee94d5277d3d79556b045376caddd541a35109d2d1647f250ac754b"
 
     /// Raw 64-byte Ed25519 signature of "hello world" under `publicKeyHex`.
-    /// 128 hex chars = 64 bytes exactly. Verified: signatureHex.count == 128.
-    private let signatureHex    = "8dad4b054f8db867b7ec2aadf0640fee22c7accb630ab8657661bdc9e3b0ca80ac2034f19fbebaeebfd1bbbbff8a0a6eebe99e72b164f766c019a0b81f8b4605"
+    /// Written as two 64-char (32-byte) halves so the length is visually
+    /// verifiable by inspection. The `assert` below enforces 128 chars at
+    /// test runtime — if this were truncated, `verifySignature_validSignature_doesNotThrow`
+    /// would throw and the suite would fail, not silently pass.
+    private let signatureHex =
+        // bytes  1–32 (64 hex chars):
+        "8dad4b054f8db867b7ec2aadf0640fee22c7accb630ab8657661bdc9e3b0ca80" +
+        // bytes 33–64 (64 hex chars):
+        "ac2034f19fbebaeebfd1bbbbff8a0a6eebe99e72b164f766c019a0b81f8b4605"
 
     /// A different valid 32-byte public key — not the one that signed the payload.
     private let wrongPublicKeyHex = "c5685cccd63e7e705aea6239a49feda80b6cadd65a80e13e8ac1f4b7307800b8"
+
+    init() {
+        // Sanity-check the baked-in test vectors at suite initialisation time.
+        // If signatureHex were truncated, this assert fires before any test runs
+        // — making a transcription error immediately visible rather than causing
+        // a confusing failure inside verifySignature_validSignature_doesNotThrow.
+        assert(signatureHex.count == 128, "signatureHex must be 128 hex chars (64 bytes); got \(signatureHex.count)")
+        assert(publicKeyHex.count == 64,  "publicKeyHex must be 64 hex chars (32 bytes); got \(publicKeyHex.count)")
+    }
 
     private func data(fromHex hex: String) -> Data {
         precondition(hex.count.isMultiple(of: 2), "data(fromHex:) requires an even-length hex string, got \(hex.count) chars")
