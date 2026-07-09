@@ -8,7 +8,7 @@ import Foundation
 /// Download, checksum verification, and local cache management for AppUpdater.
 extension AppUpdater {
 
-    /// Downloads the zip and its SHA-256 sidecar in parallel, verifies
+    /// Downloads the zip and its Ed25519 `.sig` sidecar in parallel, verifies
     /// integrity, then caches the verified zip at `destination` and advances
     /// host state.
     ///

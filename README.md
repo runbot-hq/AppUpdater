@@ -171,7 +171,7 @@ openssl pkey -in private.pem -pubout -outform DER | tail -c 32 > public.key
 **2. Sign each release artifact in CI**
 
 ```bash
-openssl pkeyutl -sign -inkey private.pem -in YourApp.zip -out YourApp.zip.sig
+openssl pkeyutl -sign -rawin -inkey private.pem -in YourApp.zip -out YourApp.zip.sig
 ```
 
 Upload both `YourApp.zip` and `YourApp.zip.sig` as assets on the GitHub Release.
@@ -184,7 +184,7 @@ Store `private.pem` contents as a GitHub Actions secret (e.g. `ED25519_PRIVATE_K
 - name: Sign release artifact
   run: |
     echo "${{ secrets.ED25519_PRIVATE_KEY }}" > private.pem
-    openssl pkeyutl -sign -inkey private.pem -in YourApp.zip -out YourApp.zip.sig
+    openssl pkeyutl -sign -rawin -inkey private.pem -in YourApp.zip -out YourApp.zip.sig
     rm private.pem
 ```
 
@@ -213,7 +213,7 @@ let updater = AppUpdater(
 
 The `.sig` sidecar must be named exactly `<assetName>.sig` — i.e. if `assetName` returns `"YourApp.zip"`, the expected sidecar is `"YourApp.zip.sig"`. A file named `"YourApp.sig"` or `"YourApp.zip.signature"` will not be found and the download will be skipped.
 
-The sidecar must be the raw 64-byte Ed25519 signature of the zip file contents (produced by `openssl pkeyutl -sign` as shown above).
+The sidecar must be the raw 64-byte Ed25519 signature of the zip file contents (produced by `openssl pkeyutl -sign -rawin` as shown above).
 
 ## Trust model
 
