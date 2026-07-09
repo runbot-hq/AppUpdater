@@ -216,6 +216,26 @@ struct AppUpdaterSignatureTests {
 
     // MARK: - openssl ↔ CryptoKit round-trip
 
+    /// Runs `executable` with `args` and returns stdout as `Data`, or `nil` on
+    /// non-zero exit. Test-only helper — production code uses `runCommand`
+    /// (Bool return, stdout discarded) because `ditto` produces no useful stdout.
+    @concurrent
+    private func runCommandOutput(_ executable: String, args: [String]) async -> Data? {
+        await withCheckedContinuation { continuation in
+            let process = Process()
+            process.executableURL = URL(filePath: executable)
+            process.arguments = args
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError  = FileHandle.nullDevice
+            process.terminationHandler = { p in
+                let output = pipe.fileHandleForReading.readDataToEndOfFile()
+                continuation.resume(returning: p.terminationStatus == 0 ? output : nil)
+            }
+            try? process.run()
+        }
+    }
+
     /// Signs a payload with `openssl pkeyutl -sign -rawin` and verifies the
     /// resulting signature with `verifySignature` (CryptoKit).
     ///
@@ -224,29 +244,16 @@ struct AppUpdaterSignatureTests {
     /// verification path in production code. The baked-in test vectors above
     /// only exercise the CryptoKit-to-CryptoKit path.
     ///
-    /// Skipped automatically when `openssl` is not found in PATH — the test
-    /// is an integration smoke-check, not a hard CI requirement.
+    /// Returns early (graceful skip) when `openssl` is not found in PATH — the
+    /// test is an integration smoke-check, not a hard CI requirement.
     @Test func verifySignature_opensslSignedPayload_doesNotThrow() async throws {
-        // Locate openssl — skip gracefully if not available.
-        let opensslPath = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-            let process = Process()
-            process.executableURL = URL(filePath: "/usr/bin/which")
-            process.arguments = ["openssl"]
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
-            process.terminationHandler = { p in
-                if p.terminationStatus == 0,
-                   let path = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                       .trimmingCharacters(in: .whitespacesAndNewlines),
-                   !path.isEmpty {
-                    continuation.resume(returning: path)
-                } else {
-                    continuation.resume(throwing: URLError(.unsupportedURL))
-                }
-            }
-            try? process.run()
-        }
+        // Locate openssl — return early (skip) if not available.
+        // Previously used withCheckedThrowingContinuation which propagated a
+        // throw and marked the test FAILED instead of skipping gracefully.
+        guard let pathData = await runCommandOutput("/usr/bin/which", args: ["openssl"]),
+              let opensslPath = String(data: pathData, encoding: .utf8)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !opensslPath.isEmpty else { return }
 
         let tmp = FileManager.default.temporaryDirectory
         let privatePEM = tmp.appendingPathComponent("test-\(UUID().uuidString).pem")
@@ -283,18 +290,17 @@ struct AppUpdaterSignatureTests {
             return
         }
 
-        // 4. Extract the raw 32-byte public key via DER tail.
-        //    `openssl pkey -pubout -outform DER | tail -c 32` gives the raw
+        // 4. Extract the raw 32-byte public key via DER tail using the async
+        //    runCommandOutput helper — consistent with the rest of this test's
+        //    async pattern and avoids blocking waitUntilExit() on @MainActor.
+        //    `openssl pkey -pubout -outform DER` last 32 bytes are the raw
         //    RFC 8032 compressed point that CryptoKit expects.
-        let pubkeyProcess = Process()
-        pubkeyProcess.executableURL = URL(filePath: opensslPath)
-        pubkeyProcess.arguments = ["pkey", "-in", privatePEM.path, "-pubout", "-outform", "DER"]
-        let pubkeyPipe = Pipe()
-        pubkeyProcess.standardOutput = pubkeyPipe
-        pubkeyProcess.standardError  = FileHandle.nullDevice
-        try pubkeyProcess.run()
-        pubkeyProcess.waitUntilExit()
-        let derBytes = pubkeyPipe.fileHandleForReading.readDataToEndOfFile()
+        guard let derBytes = await runCommandOutput(opensslPath, args: [
+            "pkey", "-in", privatePEM.path, "-pubout", "-outform", "DER"
+        ]) else {
+            Issue.record("openssl pkey DER extraction failed — skipping round-trip test")
+            return
+        }
         // The last 32 bytes of the DER-encoded SubjectPublicKeyInfo are the raw key.
         let publicKeyBytes = derBytes.suffix(32)
         #expect(publicKeyBytes.count == 32, "DER public key extraction yielded \(publicKeyBytes.count) bytes — expected 32")
