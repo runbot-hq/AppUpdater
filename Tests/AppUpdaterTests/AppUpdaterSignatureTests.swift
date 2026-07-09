@@ -232,7 +232,14 @@ struct AppUpdaterSignatureTests {
                 let output = pipe.fileHandleForReading.readDataToEndOfFile()
                 continuation.resume(returning: p.terminationStatus == 0 ? output : nil)
             }
-            try? process.run()
+            do {
+                try process.run()
+            } catch {
+                // process.run() failed (e.g. binary not found, sandbox-blocked).
+                // Resume with nil so the caller treats it as a non-zero exit
+                // and the test skips gracefully rather than hanging.
+                continuation.resume(returning: nil)
+            }
         }
     }
 
