@@ -18,6 +18,8 @@ struct UpdateCheckerCheckForUpdateTests {
 
     // MARK: - Fixture helpers
 
+    /// Loads the JSON at `Fixtures/<name>.json` via `Bundle.module` and
+    /// decodes it as `[FixtureRelease]`.
     private func loadFixture(
         named name: String
     ) throws -> [FixtureRelease] {
@@ -29,6 +31,8 @@ struct UpdateCheckerCheckForUpdateTests {
         return try JSONDecoder().decode([FixtureRelease].self, from: data)
     }
 
+    /// Decodes the first entry in the fixture and builds an `AvailableRelease`
+    /// using `assetName` to find the checksum sidecar.
     private func firstRelease(
         fromFixture name: String,
         assetName: (String) -> String = { _ in "App.zip" }
@@ -44,6 +48,7 @@ struct UpdateCheckerCheckForUpdateTests {
         )
     }
 
+    /// Builds a minimal `AvailableRelease` with a custom tag and no assets.
     private func release(tag: String) -> AvailableRelease {
         AvailableRelease(tagName: tag, assets: [], checksumURL: nil)
     }
@@ -82,21 +87,19 @@ struct UpdateCheckerCheckForUpdateTests {
     }
 
     // MARK: - Failed fetch results
-    //
-    // ⚠️ currentVersion: "" in the three tests below is intentional — ordering dependency.
-    //
-    // A reviewer may expect currentVersion: "" to produce .failed(.missingVersionKey).
-    // It does not. evaluate checks .failed fetch results *before* the empty-version
-    // guard — a failed fetch is always a fetch failure regardless of what currentVersion
-    // contains. The guard ordering in evaluate is:
-    //   1. if case .failed = fetchResult  →  return .failed(.fetchFailed(...))
-    //   2. guard !currentVersion.isEmpty  →  return .failed(.missingVersionKey)
-    //   3. guard let release              →  return .upToDate
-    //   4. channel-downgrade check
-    //   5. isNewer check
-    // emptyCurrentVersion_returnsMissingVersionKey above covers the .fetched(nil) +
-    // empty version path. These tests are complementary, not contradictory.
 
+    /// Verifies that a `.failed` fetch result propagates as
+    /// `.failed(.fetchFailed(.networkError))` regardless of `currentVersion`.
+    ///
+    /// ## ⚠️ currentVersion: "" is intentional — ordering dependency
+    ///
+    /// A reviewer may expect `currentVersion: ""` to produce
+    /// `.failed(.missingVersionKey)` instead. It does not, because
+    /// `UpdateChecker.evaluate` checks `.failed` fetch results *before* the
+    /// empty-version guard: a failed fetch is always a fetch failure regardless
+    /// of what `currentVersion` contains. `emptyCurrentVersion_returnsMissingVersionKey`
+    /// above covers the `.fetched(nil)` + empty version path. The two tests
+    /// are complementary, not contradictory.
     @Test func failedFetchResult_returnsNetworkError() {
         let simulatedError = URLError(.notConnectedToInternet)
         let result = UpdateChecker.evaluate(
@@ -115,7 +118,7 @@ struct UpdateCheckerCheckForUpdateTests {
     }
 
     @Test func failedFetchResult_returnsHttpError() {
-        // currentVersion: "" is intentional — see ordering note in the MARK above.
+        // currentVersion: "" is intentional — see ordering note above.
         let result = UpdateChecker.evaluate(
             fetchResult: .failed(.httpError(statusCode: 429)),
             currentVersion: "",
@@ -133,7 +136,7 @@ struct UpdateCheckerCheckForUpdateTests {
     }
 
     @Test func failedFetchResult_returnsDecodingError() {
-        // currentVersion: "" is intentional — see ordering note in the MARK above.
+        // currentVersion: "" is intentional — see ordering note above.
         let simulatedError = DecodingError.dataCorrupted(
             .init(codingPath: [], debugDescription: "fixture decode failure")
         )
@@ -152,7 +155,18 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// Pins the interim buildRequest-nil fallback behaviour.
+    /// Pins the interim buildRequest-nil fallback behaviour: a malformed repo
+    /// string causes `buildRequest` to return nil, which `fetchAndDecodeReleases`
+    /// maps to `.failure(.networkError(underlying: URLError(.badURL)))` in
+    /// release builds. This test exercises that exact `ReleaseFetchError` value
+    /// through `UpdateChecker.evaluate` so that when issue #38 changes the
+    /// return to `.configurationError`, this test fails loudly rather than
+    /// letting the misclassification silently persist.
+    ///
+    /// The test operates at the `evaluate` layer (not the `URLSession` layer)
+    /// because `GitHubReleaseProvider.fetchAndDecodeReleases` constructs a live
+    /// `URLSession` and cannot be injected; the evaluate path is the correct
+    /// seam to pin.
     @Test func buildRequestNilFallback_networkError_badURL_roundTripsCorrectly() {
         let badURLError = URLError(.badURL)
         let result = UpdateChecker.evaluate(
@@ -169,11 +183,13 @@ struct UpdateCheckerCheckForUpdateTests {
             Issue.record("Expected .failed(.fetchFailed(.networkError(URLError(.badURL)))), got \(result)")
             return
         }
-        #expect(urlError.code == URLError.Code.badURL)
+        #expect(urlError.code == .badURL)
     }
 
     // MARK: - Malformed semver
 
+    /// A garbage `currentVersion` string with a nil-fetched release must not
+    /// crash — `evaluate` must return `.upToDate` (no release to offer).
     @Test func malformedCurrentVersion_fetchedNil_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(nil),
@@ -186,8 +202,12 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// `ParsedVersion` returns nil for non-semver input; `isNewer` treats it as
-    /// 0.0.0, so any parseable release tag wins and evaluate returns .updateAvailable.
+    /// A garbage `currentVersion` with a valid release tag must not crash.
+    /// `ParsedVersion` returns `nil` for non-semver input and `isNewer` treats
+    /// a nil current version as `0.0.0`, so any parseable release tag wins and
+    /// `evaluate` returns `.updateAvailable`. This pins that production
+    /// fallback; a deliberate change to return `.failed` instead would require
+    /// updating this test and `ParsedVersion` together.
     @Test func malformedCurrentVersion_withValidRelease_returnsUpdateAvailable() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "v2.0.0")),
@@ -200,8 +220,10 @@ struct UpdateCheckerCheckForUpdateTests {
         }
     }
 
-    /// A garbage release tagName — ParsedVersion treats it as 0.0.0, can never
-    /// beat a real version, so evaluate returns .upToDate.
+    /// A garbage release `tagName` with a valid `currentVersion` must not crash.
+    /// `ParsedVersion` returns `nil` for the tag, so `isNewer` treats it as
+    /// `0.0.0` — which can never beat a real version — and `evaluate` returns
+    /// `.upToDate`.
     @Test func malformedReleaseTag_validCurrentVersion_returnsUpToDate() {
         let result = UpdateChecker.evaluate(
             fetchResult: .fetched(release(tag: "not-a-version")),
