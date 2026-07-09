@@ -109,15 +109,21 @@ extension AppUpdater {
             }
 
             // Ed25519 signatures are exactly 64 bytes. Reject grossly oversized
-            // sidecars before passing to CryptoKit — guards against a malicious
-            // or misconfigured release asset buffering a large payload in memory.
-            // Ceiling is 128 (2× the expected size) as a defensive upper bound
-            // against grossly oversized or malicious assets. It is not tightened
-            // to 64 because this guard is a memory-safety net, not a format
-            // validator — exact-64 enforcement happens inside CryptoKit's
-            // isValidSignature. Note: a base64-encoded .sig (88 bytes) would also
-            // pass this guard; callers must ensure the sidecar is raw binary, as
-            // documented in README § Distribution assumptions.
+            // sidecars before passing to CryptoKit. Note: `session.data(from:)`
+            // has already buffered the full response by this point — this guard
+            // is post-hoc and does not prevent the allocation. Its purpose is to
+            // catch and reject the payload early rather than passing a large
+            // buffer into CryptoKit. A true pre-buffer byte-limit would require
+            // a URLSession delegate; that complexity is not justified here because
+            // the sidecar URL comes from the GitHub Releases API (ATS-enforced
+            // HTTPS) and the threat model does not include adversarial GitHub
+            // asset uploads. Ceiling is 128 (2× the expected size) as a
+            // defensive upper bound. It is not tightened to 64 because this guard
+            // is a memory-safety net, not a format validator — exact-64
+            // enforcement happens inside CryptoKit's isValidSignature.
+            // Note: a base64-encoded .sig (88 bytes) would also pass this guard;
+            // callers must ensure the sidecar is raw binary, as documented in
+            // README § Distribution assumptions.
             guard signatureData.count <= 128 else {
                 appUpdaterLogger.error("signature sidecar is \(signatureData.count, privacy: .public) bytes — expected 64; rejecting oversized payload")
                 throw URLError(.cannotDecodeContentData)

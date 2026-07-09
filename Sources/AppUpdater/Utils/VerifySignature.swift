@@ -39,6 +39,10 @@ import Foundation
 /// a bad or forged download.
 ///
 /// Propagates any `Data(contentsOf:)` error on read failure.
+///
+/// A zero-byte zip or a zero-byte signature sidecar both produce a
+/// `false` return from `isValidSignature` and surface as
+/// `.cannotDecodeContentData` — neither causes a silent pass.
 @concurrent
 func verifySignature(zipURL: URL, signatureBytes: Data, publicKeyBytes: Data) async throws {
     let zipData = try Data(contentsOf: zipURL)

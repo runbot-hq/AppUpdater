@@ -253,6 +253,12 @@ struct AppUpdaterSignatureTests {
     ///
     /// Returns early (graceful skip) when `openssl` is not found in PATH — the
     /// test is an integration smoke-check, not a hard CI requirement.
+    /// `withKnownIssue` and `XCTSkip` are intentionally not used: both require
+    /// the skip condition to be known at compile time or declared as an expected
+    /// failure, which is semantically wrong here — the test is expected to
+    /// *pass* when `openssl` is present (always true on macOS) and simply
+    /// does not run when it is absent. A silent early return is the correct
+    /// pattern for an environment-conditional integration test.
     @Test func verifySignature_opensslSignedPayload_doesNotThrow() async throws {
         // Locate openssl — return early (skip) if not available.
         // Previously used withCheckedThrowingContinuation which propagated a
