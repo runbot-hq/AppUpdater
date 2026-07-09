@@ -193,10 +193,22 @@ public enum UpdateChecker {
             }
             guard let release else { return .upToDate }
 
-            // Parse both versions once and reuse in the downgrade guard and
-            // (for currentVersion) in the isNewer fallthrough path. Without
-            // caching, parsedCurrent would be allocated twice and parsedRelease
-            // would be allocated once with no reuse.
+            // Both versions are parsed eagerly and cached here.
+            //
+            // parsedCurrent — used by the downgrade guard (parsedCurrent.isPrerelease)
+            //   and would otherwise be re-parsed inside isNewer on the fallthrough
+            //   path. Caching avoids that redundant allocation.
+            //
+            // parsedRelease — used by the downgrade guard (!parsedRelease.isPrerelease)
+            //   only. It is NOT passed into isNewer: isNewer takes raw String
+            //   arguments and performs its own internal ParsedVersion allocations
+            //   unconditionally. There is no API to inject a pre-parsed value, and
+            //   adding one would complicate isNewer's public signature for a
+            //   negligible gain. Caching parsedRelease therefore eliminates the
+            //   allocation on the guard-fires path but does not affect the isNewer
+            //   fallthrough path, which re-parses release.tagName independently.
+            //   This asymmetry is intentional — do not remove parsedRelease on the
+            //   grounds that isNewer "already parses it anyway".
             let parsedCurrent = ParsedVersion(currentVersion)
             let parsedRelease = ParsedVersion(release.tagName)
 
