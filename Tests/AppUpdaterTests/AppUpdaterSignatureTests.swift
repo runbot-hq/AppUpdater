@@ -31,6 +31,7 @@ struct AppUpdaterSignatureTests {
     private let publicKeyHex    = "e93518e72ee94d5277d3d79556b045376caddd541a35109d2d1647f250ac754b"
 
     /// Raw 64-byte Ed25519 signature of "hello world" under `publicKeyHex`.
+    /// 128 hex chars = 64 bytes exactly. Verified: signatureHex.count == 128.
     private let signatureHex    = "8dad4b054f8db867b7ec2aadf0640fee22c7accb630ab8657661bdc9e3b0ca80ac2034f19fbebaeebfd1bbbbff8a0a6eebe99e72b164f766c019a0b81f8b4605"
 
     /// A different valid 32-byte public key — not the one that signed the payload.

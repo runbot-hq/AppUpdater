@@ -156,6 +156,12 @@ public final class AppUpdater {
     ///
     /// Must match the private key used to produce the `.sig` files in GitHub
     /// Releases. Injected at init time so the library carries no hard-coded key.
+    ///
+    /// Stored as `Data` rather than `Curve25519.Signing.PublicKey` intentionally:
+    /// this keeps the public API free of CryptoKit types and avoids a throwing
+    /// or failable `init`. The `precondition(publicKey.count == 32)` at init
+    /// catches misconfiguration immediately; parsing happens once per download
+    /// (24 h cadence) — the re-parse cost is negligible.
     let publicKey: Data
 
     /// When `false`, `installAndRelaunch` verifies that the running bundle and
