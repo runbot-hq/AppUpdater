@@ -188,7 +188,26 @@ When enabled, `codesign -dvvv` is run on both the running bundle and the downloa
 
 See [PRINCIPLES.md](PRINCIPLES.md).
 
-## Alternatives
 
-- [Sparkle](https://github.com/sparkle-project/Sparkle) — the standard choice; supports sandboxed apps, Appcast XML, delta updates, and built-in UI
-- [s1ntoneli/AppUpdater](https://github.com/s1ntoneli/AppUpdater) — GitHub Releases-based like this library but with SwiftUI UI, code-sign validation, and localized changelogs
+## Comparison tabl:
+
+| Feature | [runbot-hq/AppUpdater](https://github.com/runbot-hq/AppUpdater) | [s1ntoneli/AppUpdater](https://github.com/s1ntoneli/AppUpdater) | [Sparkle](https://github.com/sparkle-project/Sparkle) | [Squirrel.Mac](https://github.com/Squirrel/Squirrel.Mac) |
+| :-- | :-- | :-- | :-- | :-- |
+| **Distribution source** | GitHub Releases only | GitHub Releases only | Any HTTP / Appcast XML | Any HTTP / JSON feed |
+| **Sandbox support** | ❌ | ❌ | ✅ Via XPC helper | ✅ Via helper tool |
+| **Unsigned app support** | ✅ First-class default | ⚠️ Fragile / untested | ❌ Requires signing | ❌ Requires signing |
+| **Gatekeeper bypass** | ✅ Built-in | ❌ | ❌ | ❌ |
+| **Code-sign validation** | ✅ Opt-in | ✅ On by default | ✅ Required | ✅ Required |
+| **Delta updates** | ❌ | ❌ | ✅ | ✅ bsdiff-based |
+| **Semver + pre-release** | ✅ `beta.N` first-class | ✅ Full alpha/beta/etc. | ⚠️ Basic | ⚠️ No native pre-release |
+| **Zip + tarball support** | ✅ Zip | ✅ Zip + tarball | ✅ Zip + dmg | ✅ Zip |
+| **Authenticity check (EdDSA)** | ✅ EdDSA (added today) | ❌ No signature check | ✅ EdDSA (primary) | ❌ No EdDSA |
+
+A few notes :
+
+- **Squirrel.Mac** is largely deprecated and unmaintained — Electron's own updater forked from it, but the macOS-native version has seen minimal activity for years. It uses a JSON manifest feed rather than Appcast XML, and its delta support relies on bsdiff patches served from your own infrastructure.
+- **runbot-hq/AppUpdater** is the only library in this group that treats unsigned/Gatekeeper-bypass as a first-class, intentional feature rather than an unsupported edge case .
+- **Sparkle** remains the gold standard for EdDSA authenticity, having shipped EdDSA (Ed25519) as its primary signature scheme since Sparkle 2, replacing the older DSA approach.
+- The original AppUpdater: https://github.com/mxcl/AppUpdater
+- hybrid Appupdater for macos and ios that supports appstore and github releases: https://github.com/TopScrech/AutoUpdate
+
