@@ -1,6 +1,5 @@
 // AppUpdater+Download.swift
 // AppUpdater
-import CryptoKit
 import Foundation
 
 // MARK: - Download
@@ -107,6 +106,15 @@ extension AppUpdater {
             guard signatureHTTP.statusCode == 200 else {
                 appUpdaterLogger.error("signature sidecar returned HTTP \(signatureHTTP.statusCode, privacy: .public) — release may have been published without a .sig file")
                 throw URLError(.badServerResponse)
+            }
+
+            // Ed25519 signatures are exactly 64 bytes. Reject oversized sidecars
+            // before passing to CryptoKit — guards against a misconfigured or
+            // malicious release asset buffering a large payload in memory.
+            // 128-byte ceiling gives a byte of slack for e.g. a trailing newline.
+            guard signatureData.count <= 128 else {
+                appUpdaterLogger.error("signature sidecar is \(signatureData.count, privacy: .public) bytes — expected 64; rejecting oversized payload")
+                throw URLError(.cannotDecodeContentData)
             }
 
             // ── Verify Ed25519 signature ──────────────────────────
