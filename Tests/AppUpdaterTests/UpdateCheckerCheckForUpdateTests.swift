@@ -179,7 +179,7 @@ struct UpdateCheckerCheckForUpdateTests {
             Issue.record("Expected .failed(.fetchFailed(.networkError(URLError(.badURL)))), got \(result)")
             return
         }
-        #expect(urlError.code == .badURL)
+        #expect(urlError.code == URLError.Code.badURL)
     }
 
     // MARK: - Malformed semver
@@ -330,6 +330,23 @@ struct UpdateCheckerCheckForUpdateTests {
         )
         guard case .upToDate = result else {
             Issue.record("Expected .upToDate when stable current is ahead, got \(result)")
+            return
+        }
+    }
+
+    /// Pins the guard-ordering invariant: `guard let release else { return .upToDate }`
+    /// fires *before* the channel-downgrade check, so a user on a pre-release
+    /// with beta off gets `.upToDate` when there are no stable releases at all
+    /// (nothing to offer). If the guards are ever reordered, this test fails
+    /// loudly rather than silently returning `.updateAvailable(nil)` or crashing.
+    @Test func betaOff_prereleaseCurrent_noStableAvailable_returnsUpToDate() {
+        let result = UpdateChecker.evaluate(
+            fetchResult: .fetched(nil),
+            currentVersion: "v1.0.0-beta.1",
+            betaChannel: false
+        )
+        guard case .upToDate = result else {
+            Issue.record("Expected .upToDate when betaChannel=false, prerelease current, and no stable release available, got \(result)")
             return
         }
     }
