@@ -85,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         repo: "your-org/your-repo",
         currentVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
         assetName: { _ in "YourApp.zip" },               // .sig sidecar expected at "YourApp.zip.sig"
-        publicKey: Data(base64Encoded: "<your-32-byte-ed25519-public-key-base64>")!,
+        publicKey: Data(base64Encoded: "<your-32-byte-ed25519-public-key-base64>")!, // force-unwrap is intentional: a bad key is a programmer error and should crash at launch, not silently fail at update time
         schedulerIdentifier: "com.your-org.update-check" // also scopes the on-disk cache directory
         // betaChannelProvider: { false }                 // optional — defaults to stable channel only
     )

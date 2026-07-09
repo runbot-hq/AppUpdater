@@ -258,6 +258,8 @@ public final class AppUpdater {
         // validation at init would require a throwing or failable init, which
         // adds complexity for a misconfiguration that is caught before any update
         // is ever applied. This is a deliberate trade-off, not an oversight.
+        // (See also the `publicKey` property doc-comment above for the rationale
+        // on storing as `Data` and parsing per-download.)
         precondition(publicKey.count == 32, "AppUpdater: publicKey must be exactly 32 bytes (raw Ed25519 public key) — see README Key pair setup for how to derive this from public.pem")
         self.repo = repo
         self.currentVersion = currentVersion
