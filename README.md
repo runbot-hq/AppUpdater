@@ -18,6 +18,22 @@ distributed via GitHub Releases outside the Mac App Store.
 ![Periphery](https://github.com/runbot-hq/AppUpdater/actions/workflows/periphery.yml/badge.svg)
 [![Greptile](https://img.shields.io/badge/🦎%20AI%20Review-Greptile-6C47FF?logoColor=white)](https://greptile.com)
 
+## Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Caveats](#caveats)
+- [Flow](#flow)
+- [Minimal host app](#minimal-host-app)
+- [Cache](#cache)
+- [Background check interval](#background-check-interval)
+- [Key pair setup](#key-pair-setup)
+- [Distribution assumptions](#distribution-assumptions)
+- [Trust model](#trust-model)
+- [Known limitations](#known-limitations)
+- [Design principles](#design-principles)
+- [Comparison](#comparison)
+
 ## Features
 
 - 🔓 **No Apple Developer account required** — works with unsigned and ad-hoc signed apps; Ed25519 signature verification provides integrity and authenticity without code signing
@@ -254,7 +270,7 @@ When enabled, `codesign -dvvv` is run on both the running bundle and the downloa
 See [PRINCIPLES.md](PRINCIPLES.md).
 
 
-## Comparison tabl:
+## Comparison
 
 | Feature | [runbot-hq/AppUpdater](https://github.com/runbot-hq/AppUpdater) | [s1ntoneli/AppUpdater](https://github.com/s1ntoneli/AppUpdater) | [Sparkle](https://github.com/sparkle-project/Sparkle) | [Squirrel.Mac](https://github.com/Squirrel/Squirrel.Mac) |
 | :-- | :-- | :-- | :-- | :-- |
