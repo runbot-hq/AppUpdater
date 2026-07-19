@@ -275,14 +275,14 @@ See [PRINCIPLES.md](PRINCIPLES.md).
 | Feature | [runbot-hq/AppUpdater](https://github.com/runbot-hq/AppUpdater) | [s1ntoneli/AppUpdater](https://github.com/s1ntoneli/AppUpdater) | [Sparkle](https://github.com/sparkle-project/Sparkle) | [Squirrel.Mac](https://github.com/Squirrel/Squirrel.Mac) |
 | :-- | :-- | :-- | :-- | :-- |
 | **Distribution source** | GitHub Releases only | GitHub Releases only | Any HTTP / Appcast XML | Any HTTP / JSON feed |
-| **Sandbox support** | ❌ | ❌ | ✅ Via XPC helper | ✅ Via helper tool |
 | **Unsigned app support** | ✅ First-class default | ⚠️ Fragile / untested | ❌ Requires signing | ❌ Requires signing |
 | **Gatekeeper bypass** | ✅ Built-in | ❌ | ❌ | ❌ |
 | **Code-sign validation** | ✅ Opt-in | ✅ On by default | ✅ Required | ✅ Required |
-| **Delta updates** | ❌ | ❌ | ✅ | ✅ bsdiff-based |
 | **Semver + pre-release** | ✅ `beta.N` first-class | ✅ Full alpha/beta/etc. | ⚠️ Basic | ⚠️ No native pre-release |
 | **Zip + tarball support** | ✅ Zip | ✅ Zip + tarball | ✅ Zip + dmg | ✅ Zip |
 | **Authenticity check (EdDSA)** | ✅ EdDSA (added today) | ❌ No signature check | ✅ EdDSA (primary) | ❌ No EdDSA |
+| **Sandbox support** | ❌ | ❌ | ✅ Via XPC helper | ✅ Via helper tool |
+| **Delta updates** | ❌ | ❌ | ✅ | ✅ bsdiff-based |
 
 **Row glossary**
 
