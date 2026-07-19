@@ -284,6 +284,18 @@ See [PRINCIPLES.md](PRINCIPLES.md).
 | **Zip + tarball support** | ✅ Zip | ✅ Zip + tarball | ✅ Zip + dmg | ✅ Zip |
 | **Authenticity check (EdDSA)** | ✅ EdDSA (added today) | ❌ No signature check | ✅ EdDSA (primary) | ❌ No EdDSA |
 
+**Row glossary**
+
+- **Distribution source** — where the library fetches release metadata and download URLs from
+- **Sandbox support** — whether the library works inside a macOS App Sandbox (requires an XPC helper for privileged file operations)
+- **Unsigned app support** — whether the library can update apps that are not code-signed with a Developer ID
+- **Gatekeeper bypass** — whether the update flow avoids macOS quarantine without requiring manual user approval of the downloaded bundle
+- **Code-sign validation** — whether the library verifies the downloaded bundle matches the running app's Developer ID identity
+- **Delta updates** — whether only changed bytes are downloaded rather than the full app bundle
+- **Semver + pre-release** — which version string formats are supported, including pre-release suffixes like `beta.N`, `rc.1`, `alpha.1`
+- **Zip + tarball support** — which archive formats are accepted as the release artifact
+- **Authenticity check (EdDSA)** — whether the downloaded artifact is verified against an Ed25519 cryptographic signature before install
+
 A few notes :
 
 - **Squirrel.Mac** is largely deprecated and unmaintained — Electron's own updater forked from it, but the macOS-native version has seen minimal activity for years. It uses a JSON manifest feed rather than Appcast XML, and its delta support relies on bsdiff patches served from your own infrastructure.
