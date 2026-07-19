@@ -280,7 +280,7 @@ See [PRINCIPLES.md](PRINCIPLES.md).
 | **Code-sign validation** | ✅ Opt-in | ✅ On by default | ✅ Required | ✅ Required |
 | **Semver + pre-release** | ✅ `beta.N` first-class | ✅ Full alpha/beta/etc. | ⚠️ Basic | ⚠️ No native pre-release |
 | **Zip + tarball support** | ✅ Zip | ✅ Zip + tarball | ✅ Zip + dmg | ✅ Zip |
-| **Authenticity check (EdDSA)** | ✅ EdDSA (added today) | ❌ No signature check | ✅ EdDSA (primary) | ❌ No EdDSA |
+| **Authenticity check (EdDSA)** | ✅ EdDSA | ❌ No signature check | ✅ EdDSA (primary) | ❌ No EdDSA |
 | **Sandbox support** | ❌ | ❌ | ✅ Via XPC helper | ✅ Via helper tool |
 | **Delta updates** | ❌ | ❌ | ✅ | ✅ bsdiff-based |
 
