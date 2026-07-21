@@ -190,9 +190,11 @@ extension AppUpdater {
                 let tagVersion = release.tagName.hasPrefix("v") ? String(release.tagName.dropFirst()) : release.tagName
                 if tagVersion == currentVersion {
                     appUpdaterLogger.debug("post-relaunch zip leftover detected: \(release.tagName, privacy: .public) matches running version — applying .idle (issue #58)")
-                    state.apply(.idle); return
+                    state.apply(.idle)
+                    return
                 }
-                state.apply(.ready(version: release.tagName)); return
+                state.apply(.ready(version: release.tagName))
+                return
             }
 
             // ── 2. Asset or signature sidecar absent? ───────────────────────────────────────────────────────────────────────
