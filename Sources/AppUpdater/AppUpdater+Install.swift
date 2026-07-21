@@ -394,6 +394,17 @@ extension AppUpdater {
         return appInZip
     }
 
+    /// Reads `CFBundleShortVersionString` from a bundle's `Info.plist` off the
+    /// main actor (P18 — blocking I/O must not run on actor cooperative threads).
+    ///
+    /// Returns `nil` if the plist is absent or the key is missing.
+    @concurrent
+    private func readBundleVersion(at bundleURL: URL) -> String? {
+        let infoPlistURL = bundleURL.appending(path: "Contents/Info.plist")
+        let info = NSDictionary(contentsOf: infoPlistURL)
+        return info?["CFBundleShortVersionString"] as? String
+    }
+
     /// Atomically replaces the running bundle, verifies the swap, relaunches
     /// via `NSWorkspace.openApplication`, deletes the zip once relaunch is
     /// confirmed, then terminates via `NSApp.terminate` inside the completion handler.
@@ -405,7 +416,7 @@ extension AppUpdater {
     /// new process, before the new instance has actually launched. This created
     /// a race: `NSApp.terminate(nil)` could kill the old process before the new
     /// one was fully up, or the new process could start loading the bundle from
-    /// the kernel's vnode cache before the filesystem rename was fully visible.
+    /// the kernel's vnode cache before the filesystem rename was fully visible to it.
     ///
     /// `NSWorkspace.openApplication(at:configuration:completionHandler:)` calls
     /// back only after the new process has launched (or failed). By placing
@@ -422,8 +433,9 @@ extension AppUpdater {
     /// match, we apply `.failed` and return without relaunching — the wrong
     /// bundle is on disk and the user must not be launched into it silently.
     ///
-    /// This is a deterministic check: one synchronous plist read, no timing
-    /// assumption, no sleep. Fixes runbot-hq/run-bot#2193.
+    /// This is a deterministic check: one synchronous plist read off `@MainActor`
+    /// via a `@concurrent` helper, no timing assumption, no sleep. Fixes
+    /// runbot-hq/run-bot#2193.
     private func replaceAndRelaunch( // skipcq: SW-R1002 — reviewed; sequential install steps, complexity is inherent
         appInZip: URL,
         bundleURL: URL,
@@ -454,6 +466,7 @@ extension AppUpdater {
         let finalURL: URL
         do {
             finalURL = (try fm.replaceItemAt(bundleURL, withItemAt: appInZip)) ?? bundleURL
+            appUpdaterLogger.debug("replaceItem succeeded — new bundle at \(finalURL.path(percentEncoded: false), privacy: .public)")
         } catch {
             appUpdaterLogger.error("replaceItem failed: \(String(describing: error), privacy: .public)")
             isInstalling = false
@@ -475,8 +488,10 @@ extension AppUpdater {
         // leading "v" (e.g. "v0.7.3") while CFBundleShortVersionString is always
         // "0.7.3" — we strip the leading "v" before comparing.
         //
-        // This is a synchronous plist read on a local bundle — completes in
-        // microseconds. Do NOT make this async or wrap it in a Task.
+        // The read is done via readBundleVersion(at:) — a @concurrent helper —
+        // so the blocking NSDictionary(contentsOf:) call runs off the main actor
+        // cooperative thread (Principle 18). For a local bundle it completes in
+        // microseconds, but the principle holds regardless.
         //
         // On mismatch we apply .failed and return without relaunching. The wrong
         // bundle is on disk. The user sees a recoverable error and can retry or
@@ -485,12 +500,12 @@ extension AppUpdater {
         // the correct terminal state here.
         //
         // REVIEWER: do NOT remove this step on the grounds that replaceItemAt
-        // "always works". This guard is the fix for runbot-hq/run-bot#2193 —
-        // the flaky relaunch-into-old-version bug. The cost is one plist read.
+        // "always works". This guard catches the edge case where the swap
+        // succeeded at the filesystem level but the wrong bundle ended up on disk
+        // (packaging issue, ?? bundleURL fallback, path edge case). The cost is
+        // one async plist read.
         #if canImport(AppKit)
-        let infoPlistURL = finalURL.appending(path: "Contents/Info.plist")
-        let swappedInfo = NSDictionary(contentsOf: infoPlistURL)
-        let swappedVersion = swappedInfo?["CFBundleShortVersionString"] as? String
+        let swappedVersion = await readBundleVersion(at: finalURL)
         // Strip leading "v" from the tag for comparison — CFBundleShortVersionString
         // is always "X.Y.Z", never "vX.Y.Z". GitHub tags are always "vX.Y.Z".
         // Do NOT compare raw tag strings here — it will always mismatch.
@@ -532,8 +547,15 @@ extension AppUpdater {
         // cache for the just-swapped bundle. This was the root cause of
         // runbot-hq/run-bot#2193.
         //
-        // completionHandler is called on an arbitrary queue — we hop back to
-        // @MainActor for NSApp.terminate, which must be called on the main thread.
+        // completionHandler is called on an arbitrary queue. We hop back to
+        // @MainActor via Task { @MainActor in } — the correct Swift 6 pattern
+        // (Principle 1/4). Do NOT replace with DispatchQueue.main.async.
+        //
+        // Strong capture of self is intentional — AppUpdater is owned by
+        // AppDelegate and lives for the full app lifetime. [weak self] would
+        // introduce a silent nil-skip of isInstalling = false on the error path,
+        // leaving the state machine permanently locked for the session.
+        // REVIEWER: do NOT change to [weak self].
         //
         // On launch failure: the completion handler receives a non-nil error.
         // We log it and apply .failed. The new binary IS on disk (swap was
@@ -544,15 +566,15 @@ extension AppUpdater {
         // ceases to exist. Do NOT add isInstalling = false on the success path.
         #if canImport(AppKit)
         let config = NSWorkspace.OpenConfiguration()
-        config.createsNewInstance = true
-        NSWorkspace.shared.openApplication(at: finalURL, configuration: config) { [weak self] _, error in
+        config.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: finalURL, configuration: config) { [self] _, error in
             if let error {
                 // Launch failed after a confirmed successful swap.
                 // The new binary IS on disk. Apply .failed so the host
                 // surfaces a recoverable error — the user can relaunch manually.
-                Task { @MainActor [weak self] in
-                    self?.appUpdaterLogger.error("NSWorkspace.openApplication failed after verified swap — new binary is on disk, relaunch manually: \(error.localizedDescription, privacy: .public)")
-                    self?.isInstalling = false
+                Task { @MainActor in
+                    self.appUpdaterLogger.error("NSWorkspace.openApplication failed after verified swap — new binary is on disk, relaunch manually: \(error.localizedDescription, privacy: .public)")
+                    self.isInstalling = false
                     state.apply(.failed(version: version))
                 }
             } else {
