@@ -544,27 +544,36 @@ extension AppUpdater {
         try? fm.removeItem(at: zipURL)
 
         // ── Step 5: relaunch via NSWorkspace ─────────────────────────────────
-        // NSWorkspace.openApplication(at:configuration:completionHandler:) is
-        // used instead of the previous `Process("/usr/bin/open -n")` approach.
-        //
-        // The key difference: the completion handler fires only after the new
-        // process has launched (or failed). Placing NSApp.terminate(nil) inside
-        // the completion handler keeps the old process alive until the new
-        // instance is confirmed running — deterministically.
-        //
-        // The previous `open -n` via Process was non-blocking: relaunchTask.run()
-        // returned immediately, and NSApp.terminate fired right after — racing
-        // with the new process startup and the kernel vnode cache for the
-        // just-swapped bundle. That race was the root cause of run-bot#2193.
-        //
+        await relaunchApp(at: finalURL, version: version, state: state)
+
+        #endif // canImport(AppKit)
+    }
+
+    /// Relaunches the app at `finalURL` via `NSWorkspace.openApplication` and
+    /// terminates the current process inside the completion handler.
+    ///
+    /// Extracted from `replaceAndRelaunch` solely to satisfy the
+    /// `function_body_length` lint rule — the two functions form one logical unit.
+    ///
+    /// ## Why NSWorkspace instead of `open -n`
+    /// See `replaceAndRelaunch` doc. The completion handler fires only after the
+    /// new process has launched, making `NSApp.terminate` deterministic.
+    ///
+    /// ## Capture semantics
+    /// Strong capture of `self` is intentional — AppUpdater is owned by
+    /// AppDelegate and lives for the full app lifetime. `[weak self]` would
+    /// silently skip `isInstalling = false` on the error path, permanently
+    /// locking the state machine. REVIEWER: do NOT change to `[weak self]`.
+    @MainActor
+    private func relaunchApp(
+        at finalURL: URL,
+        version: String,
+        state: any UpdateStateProviding
+    ) async {
+        #if canImport(AppKit)
         // completionHandler is called on an arbitrary queue. We hop back to
         // @MainActor via Task { @MainActor in } — the correct Swift 6 pattern.
         // Do NOT replace with DispatchQueue.main.async.
-        //
-        // Strong capture of self is intentional — AppUpdater is owned by
-        // AppDelegate and lives for the full app lifetime. [weak self] would
-        // silently skip isInstalling = false on the error path, permanently
-        // locking the state machine. REVIEWER: do NOT change to [weak self].
         //
         // isInstalling is NOT reset before NSApp.terminate(nil) on the success
         // path — the process is about to exit; the flag ceases to exist.
@@ -591,7 +600,6 @@ extension AppUpdater {
                 }
             }
         }
-
-        #endif // canImport(AppKit)
+        #endif
     }
 }
