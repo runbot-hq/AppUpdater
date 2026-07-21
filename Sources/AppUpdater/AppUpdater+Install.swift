@@ -466,6 +466,13 @@ extension AppUpdater {
         // the completion handler, so this process never exits before the new
         // one is up.
         //
+        // The completion handler is called on an arbitrary queue by the OS.
+        // Task { @MainActor in } is used to hop back to the main actor for all
+        // work inside the handler — this is required because AppUpdater is a
+        // @MainActor-isolated class and DispatchQueue.main.async does not
+        // satisfy the Swift 6 compiler's actor-isolation checks. Do NOT replace
+        // Task { @MainActor in } with DispatchQueue.main.async here.
+        //
         // isInstalling is NOT reset before NSApp.terminate(nil) — this is
         // deliberate. The process exits; the flag ceases to exist.
         #if canImport(AppKit)
@@ -480,16 +487,16 @@ extension AppUpdater {
                 // The new instance failed to launch after a successful replaceItem.
                 // The new .app IS on disk — the user can relaunch manually.
                 // Apply .failed so the host shows a recoverable error state.
-                self?.appUpdaterLogger.error("relaunch failed after successful replaceItem — new binary is on disk, relaunch manually: \(error.localizedDescription, privacy: .public)")
-                DispatchQueue.main.async {
+                Task { @MainActor [weak self] in
+                    self?.appUpdaterLogger.error("relaunch failed after successful replaceItem — new binary is on disk, relaunch manually: \(error.localizedDescription, privacy: .public)")
                     self?.isInstalling = false
                     state.apply(.failed(version: version))
                 }
                 return
             }
             // New instance confirmed launched — safe to terminate.
-            appUpdaterLogger.debug("relaunch confirmed — terminating old instance")
-            DispatchQueue.main.async {
+            Task { @MainActor in
+                appUpdaterLogger.debug("relaunch confirmed — terminating old instance")
                 NSApp.terminate(nil)
             }
         }
