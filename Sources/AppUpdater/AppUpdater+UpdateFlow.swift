@@ -174,11 +174,11 @@ extension AppUpdater {
         withZipURL { zipURL in
             if FileManager.default.fileExists(atPath: zipURL.path(percentEncoded: false)) {
                 // ── Zip-deletion race guard (issue #58) ──────────────────────────────
-                // After installAndRelaunch, the old process deletes the zip
-                // asynchronously *after* firing open -n. The new process can reach
-                // this point before deletion completes and find a zip on disk for
-                // the version it is already running. Applying .ready here would
-                // show the Install button spuriously on an already-updated binary.
+                // After installAndRelaunch, the zip is deleted synchronously after
+                // swap verification but before relaunch (Step 4 in replaceAndRelaunch).
+                // The new process can still reach this point before deletion returns
+                // and find a zip on disk for the version it is already running.
+                // Applying .ready here would show the Install button spuriously.
                 //
                 // currentVersion is baked into AppUpdater at init() from
                 // Bundle.main of the running process — it is always authoritative
@@ -190,11 +190,9 @@ extension AppUpdater {
                 let tagVersion = release.tagName.hasPrefix("v") ? String(release.tagName.dropFirst()) : release.tagName
                 if tagVersion == currentVersion {
                     appUpdaterLogger.debug("post-relaunch zip leftover detected: \(release.tagName, privacy: .public) matches running version — applying .idle (issue #58)")
-                    state.apply(.idle)
-                    return
+                    state.apply(.idle); return
                 }
-                state.apply(.ready(version: release.tagName))
-                return
+                state.apply(.ready(version: release.tagName)); return
             }
 
             // ── 2. Asset or signature sidecar absent? ───────────────────────────────────────────────────────────────────────
