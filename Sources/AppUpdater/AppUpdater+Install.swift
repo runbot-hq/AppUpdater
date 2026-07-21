@@ -395,11 +395,16 @@ extension AppUpdater {
     }
 
     /// Reads `CFBundleShortVersionString` from a bundle's `Info.plist` off the
-    /// main actor (P18 — blocking I/O must not run on actor cooperative threads).
+    /// main actor (Principle 18 — blocking I/O must not run on actor cooperative threads).
+    ///
+    /// `@concurrent` requires `async` — the function is marked async so the
+    /// compiler can schedule it off the calling actor's executor. The body is
+    /// synchronous (one local plist read), but the `async` declaration is the
+    /// mechanism that allows `@concurrent` to take effect.
     ///
     /// Returns `nil` if the plist is absent or the key is missing.
     @concurrent
-    private func readBundleVersion(at bundleURL: URL) -> String? {
+    private func readBundleVersion(at bundleURL: URL) async -> String? {
         let infoPlistURL = bundleURL.appending(path: "Contents/Info.plist")
         let info = NSDictionary(contentsOf: infoPlistURL)
         return info?["CFBundleShortVersionString"] as? String
@@ -478,7 +483,7 @@ extension AppUpdater {
         // ── Step 2: clean up scratch dir ────────────────────────────────────
         try? fm.removeItem(at: tmpDir)
 
-        // ── Step 3: post-swap version verification ───────────────────────────
+        // ── Step 3: post-swap version verification ───────────────────────────────
         // replaceItemAt not throwing is necessary but not sufficient — it only
         // confirms the filesystem rename completed. We also verify that the
         // bundle now on disk is actually the version we intended to install.
@@ -488,7 +493,7 @@ extension AppUpdater {
         // leading "v" (e.g. "v0.7.3") while CFBundleShortVersionString is always
         // "0.7.3" — we strip the leading "v" before comparing.
         //
-        // The read is done via readBundleVersion(at:) — a @concurrent helper —
+        // The read is done via readBundleVersion(at:) — a @concurrent async helper —
         // so the blocking NSDictionary(contentsOf:) call runs off the main actor
         // cooperative thread (Principle 18). For a local bundle it completes in
         // microseconds, but the principle holds regardless.
@@ -549,7 +554,7 @@ extension AppUpdater {
         //
         // completionHandler is called on an arbitrary queue. We hop back to
         // @MainActor via Task { @MainActor in } — the correct Swift 6 pattern
-        // (Principle 1/4). Do NOT replace with DispatchQueue.main.async.
+        // (Principles 1/4). Do NOT replace with DispatchQueue.main.async.
         //
         // Strong capture of self is intentional — AppUpdater is owned by
         // AppDelegate and lives for the full app lifetime. [weak self] would
@@ -573,7 +578,8 @@ extension AppUpdater {
                 // The new binary IS on disk. Apply .failed so the host
                 // surfaces a recoverable error — the user can relaunch manually.
                 Task { @MainActor in
-                    self.appUpdaterLogger.error("NSWorkspace.openApplication failed after verified swap — new binary is on disk, relaunch manually: \(error.localizedDescription, privacy: .public)")
+                    // swiftlint:disable:next line_length
+                    appUpdaterLogger.error("NSWorkspace.openApplication failed after verified swap — new binary is on disk, relaunch manually: \(error.localizedDescription, privacy: .public)")
                     self.isInstalling = false
                     state.apply(.failed(version: version))
                 }
