@@ -85,7 +85,9 @@ extension AppUpdater {
     /// Responds to a newly discovered available release.
     ///
     /// 1. If a zip already exists at the fixed zip URL, moves directly to `.ready`
-    ///    without re-downloading.
+    ///    without re-downloading — unless the cached version matches the running
+    ///    version, in which case the zip is a post-relaunch leftover and `.idle`
+    ///    is applied instead (zip-deletion race guard, see issue #58).
     /// 2. If the release has no matching asset or no signature sidecar URL,
     ///    logs a warning and returns — no phase change.
     /// 3. Otherwise advances to `.available` and starts a background download.
@@ -171,6 +173,26 @@ extension AppUpdater {
         // ACCUMULATION and FILENAME RECONSTRUCTION points above.
         withZipURL { zipURL in
             if FileManager.default.fileExists(atPath: zipURL.path(percentEncoded: false)) {
+                // ── Zip-deletion race guard (issue #58) ──────────────────────────────
+                // After installAndRelaunch, the old process deletes the zip
+                // asynchronously *after* firing open -n. The new process can reach
+                // this point before deletion completes and find a zip on disk for
+                // the version it is already running. Applying .ready here would
+                // show the Install button spuriously on an already-updated binary.
+                //
+                // currentVersion is baked into AppUpdater at init() from
+                // Bundle.main of the running process — it is always authoritative
+                // regardless of what is on disk. The comparison is race-free.
+                //
+                // The leading "v" is stripped from release.tagName to match the
+                // CFBundleShortVersionString format used by currentVersion
+                // (e.g. tagName "v0.7.7" → "0.7.7" == currentVersion "0.7.7").
+                let tagVersion = release.tagName.hasPrefix("v") ? String(release.tagName.dropFirst()) : release.tagName
+                if tagVersion == currentVersion {
+                    appUpdaterLogger.debug("post-relaunch zip leftover detected: \(release.tagName, privacy: .public) matches running version — applying .idle (issue #58)")
+                    state.apply(.idle)
+                    return
+                }
                 state.apply(.ready(version: release.tagName))
                 return
             }
