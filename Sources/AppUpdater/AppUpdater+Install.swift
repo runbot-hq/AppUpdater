@@ -151,7 +151,13 @@ extension AppUpdater {
             // NOTE: os.Logger does not support + on OSLogMessage operands —
             // the message must be a single string literal with all interpolations
             // inline. Do not split this across multiple literals joined with +.
-            appUpdaterLogger.warning("yank-revalidation: cached version \(version, privacy: .public) superseded by \(latest.tagName, privacy: .public) — wiping zip and resetting to idle")
+            // Trailing-backslash line continuation inside """ keeps physical
+            // lines short while the logged string remains a single literal.
+            appUpdaterLogger.warning("""
+                yank-revalidation: cached version \(version, privacy: .public) \
+                superseded by \(latest.tagName, privacy: .public) \
+                — wiping zip and resetting to idle
+                """)
             // removeItem runs synchronously on @MainActor via withZipURL —
             // this is intentional. The zip is always a local ~/Library/Caches
             // file, never a network or NFS path; the call completes in
@@ -203,7 +209,10 @@ extension AppUpdater {
                     if nsErr.domain == NSCocoaErrorDomain && nsErr.code == NSFileNoSuchFileError {
                         appUpdaterLogger.debug("yank-revalidation: zip already absent at removal — proceeding to .idle")
                     } else {
-                        appUpdaterLogger.error("yank-revalidation: failed to remove stale zip — applying .failed: \(String(describing: error), privacy: .public)")
+                        appUpdaterLogger.error("""
+                            yank-revalidation: failed to remove stale zip \
+                            — applying .failed: \(String(describing: error), privacy: .public)
+                            """)
                         zipRemovalFailed = true
                     }
                 }
@@ -274,7 +283,10 @@ extension AppUpdater {
         // that the installed bundle's signing identity is verified against the
         // running bundle before the swap.
         if skipCodeSignValidation {
-            appUpdaterLogger.warning("skipCodeSignValidation is true — code-sign identity check is disabled; install proceeds on SHA-256 integrity alone")
+            appUpdaterLogger.warning("""
+                skipCodeSignValidation is true — code-sign identity check is disabled; \
+                install proceeds on SHA-256 integrity alone
+                """)
         }
 
         // withZipURL snapshots fixedZipURL once for the entire install sequence.
@@ -471,7 +483,10 @@ extension AppUpdater {
         let finalURL: URL
         do {
             finalURL = (try fm.replaceItemAt(bundleURL, withItemAt: appInZip)) ?? bundleURL
-            appUpdaterLogger.debug("replaceItem succeeded — new bundle at \(finalURL.path(percentEncoded: false), privacy: .public)")
+            appUpdaterLogger.debug("""
+                replaceItem succeeded — new bundle at \
+                \(finalURL.path(percentEncoded: false), privacy: .public)
+                """)
         } catch {
             appUpdaterLogger.error("replaceItem failed: \(String(describing: error), privacy: .public)")
             isInstalling = false
@@ -516,14 +531,21 @@ extension AppUpdater {
         // Do NOT compare raw tag strings here — it will always mismatch.
         let expectedBundleVersion = version.hasPrefix("v") ? String(version.dropFirst()) : version
         guard swappedVersion == expectedBundleVersion else {
-            let found = swappedVersion ?? "nil"
-            let path = finalURL.path(percentEncoded: false)
-            appUpdaterLogger.error("post-swap check failed: expected \(expectedBundleVersion, privacy: .public), got \(found, privacy: .public) at \(path, privacy: .public)")
+            appUpdaterLogger.error("""
+                post-swap verification failed: \
+                expected \(expectedBundleVersion, privacy: .public), \
+                got \(swappedVersion ?? "nil", privacy: .public) \
+                at \(finalURL.path(percentEncoded: false), privacy: .public) \
+                — aborting relaunch
+                """)
             isInstalling = false
             state.apply(.failed(version: version))
             return
         }
-        appUpdaterLogger.debug("post-swap ok: \(swappedVersion ?? "nil", privacy: .public) == \(expectedBundleVersion, privacy: .public)")
+        appUpdaterLogger.debug("""
+            post-swap verification passed: \
+            \(swappedVersion ?? "nil", privacy: .public) == \(expectedBundleVersion, privacy: .public)
+            """)
         #endif
 
         // ── Step 4: delete zip (swap confirmed) ──────────────────────────────
@@ -579,9 +601,12 @@ extension AppUpdater {
                 // Launch failed after a confirmed successful swap.
                 // The new binary IS on disk. Apply .failed so the host
                 // surfaces a recoverable error — the user can relaunch manually.
-                let msg = error.localizedDescription
                 Task { @MainActor in
-                    appUpdaterLogger.error("NSWorkspace.openApplication failed — new binary on disk, relaunch manually: \(msg, privacy: .public)")
+                    appUpdaterLogger.error("""
+                        NSWorkspace.openApplication failed after verified swap \
+                        — new binary is on disk, relaunch manually: \
+                        \(error.localizedDescription, privacy: .public)
+                        """)
                     self.isInstalling = false
                     state.apply(.failed(version: version))
                 }
