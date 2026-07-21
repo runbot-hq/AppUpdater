@@ -203,7 +203,7 @@ extension AppUpdater {
                     if nsErr.domain == NSCocoaErrorDomain && nsErr.code == NSFileNoSuchFileError {
                         appUpdaterLogger.debug("yank-revalidation: zip already absent at removal — proceeding to .idle")
                     } else {
-                        appUpdaterLogger.error("yank-revalidation: failed to remove stale zip — applying .failed to prevent stale-zip re-entry: \(String(describing: error), privacy: .public)")
+                        appUpdaterLogger.error("yank-revalidation: failed to remove stale zip — applying .failed: \(String(describing: error), privacy: .public)")
                         zipRemovalFailed = true
                     }
                 }
@@ -483,7 +483,7 @@ extension AppUpdater {
         // ── Step 2: clean up scratch dir ────────────────────────────────────
         try? fm.removeItem(at: tmpDir)
 
-        // ── Step 3: post-swap version verification ───────────────────────────────
+        // ── Step 3: post-swap version verification ───────────────────────────
         // replaceItemAt not throwing is necessary but not sufficient — it only
         // confirms the filesystem rename completed. We also verify that the
         // bundle now on disk is actually the version we intended to install.
@@ -516,7 +516,9 @@ extension AppUpdater {
         // Do NOT compare raw tag strings here — it will always mismatch.
         let expectedBundleVersion = version.hasPrefix("v") ? String(version.dropFirst()) : version
         guard swappedVersion == expectedBundleVersion else {
-            appUpdaterLogger.error("post-swap verification failed: expected \(expectedBundleVersion, privacy: .public) but found \(swappedVersion ?? "nil", privacy: .public) at \(finalURL.path(percentEncoded: false), privacy: .public) — aborting relaunch")
+            // Extract path separately to keep the log line under SwiftLint's limit.
+            let bundlePath = finalURL.path(percentEncoded: false)
+            appUpdaterLogger.error("post-swap verification failed: expected \(expectedBundleVersion, privacy: .public), got \(swappedVersion ?? "nil", privacy: .public) at \(bundlePath, privacy: .public)")
             isInstalling = false
             state.apply(.failed(version: version))
             return
@@ -577,9 +579,10 @@ extension AppUpdater {
                 // Launch failed after a confirmed successful swap.
                 // The new binary IS on disk. Apply .failed so the host
                 // surfaces a recoverable error — the user can relaunch manually.
+                // Extract description separately to keep the log line under SwiftLint's limit.
+                let msg = error.localizedDescription
                 Task { @MainActor in
-                    // swiftlint:disable:next line_length
-                    appUpdaterLogger.error("NSWorkspace.openApplication failed after verified swap — new binary is on disk, relaunch manually: \(error.localizedDescription, privacy: .public)")
+                    appUpdaterLogger.error("NSWorkspace.openApplication failed — new binary on disk, relaunch manually: \(msg, privacy: .public)")
                     self.isInstalling = false
                     state.apply(.failed(version: version))
                 }
