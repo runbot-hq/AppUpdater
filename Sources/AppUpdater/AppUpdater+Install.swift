@@ -6,19 +6,6 @@
 #if canImport(AppKit)
 import AppKit
 #else
-// This fatalError is intentionally a compile error on non-AppKit platforms
-// (a bare statement outside a declaration body does not compile in Swift).
-// That is the correct behaviour — it surfaces the problem at build time, not
-// at runtime. The package is macOS-only (platforms: [.macOS(.v26)]) so this
-// branch is structurally unreachable today.
-//
-// SPM UNIT TEST BOUNDARY: `swift test` runs in a headless process that cannot
-// import AppKit. The #if canImport(AppKit) guard above means none of this file's
-// code is compiled into the test bundle. If a future test somehow reaches this
-// file (e.g. by adding a cross-module import that forces compilation), the
-// compile error is the correct signal: mock above the AppKit boundary, do not
-// add stub logic here.
-//
 // swiftlint:disable:next line_length
 #error("AppUpdater requires AppKit. If you are hitting this from `swift test`: this code path touches AppKit and cannot be exercised in the SPM headless test runner. Do not test it. Do not add an #else branch with stub logic. Mock above the AppKit boundary instead.")
 #endif
@@ -90,14 +77,12 @@ extension AppUpdater {
             isInstalling = false
             return
         }
-        // ────────────────────────────────────────────────────────────────────
 
         // ── Post-revalidation state re-check ─────────────────────────────────
         guard case .ready = state.currentPhase else {
             isInstalling = false
             return
         }
-        // ─────────────────────────────────────────────────────────────────────
 
         if skipCodeSignValidation {
             appUpdaterLogger.warning("skipCodeSignValidation is true — code-sign identity check is disabled; install proceeds on SHA-256 integrity alone")
@@ -203,9 +188,6 @@ extension AppUpdater {
         try? fm.removeItem(at: tmpDir)
 
         // ── Step 3: delete zip before relaunch ───────────────────────────────
-        // Zip is deleted here — before the relaunch completion handler fires —
-        // so it is gone regardless of whether the completion handler runs on
-        // this process's remaining lifetime.
         try? fm.removeItem(at: zipURL)
 
         // ── Step 4: relaunch + terminate (strictly sequential) ────────────────
@@ -221,11 +203,14 @@ extension AppUpdater {
         //
         // Strong capture of self ([self]) is intentional — AppUpdater is owned
         // by AppDelegate and lives for the full app lifetime. [weak self] causes
-        // self?.appUpdaterLogger to lose its concrete type (appUpdaterLogger is a
-        // nonisolated let, not accessible via optional chaining in this context),
-        // producing a compile error AND a silent nil-skip of isInstalling = false
-        // on the error path, leaving the state machine permanently locked.
+        // a compile error because appUpdaterLogger is a module-level `let` in
+        // AppUpdaterLogger.swift — NOT a member of AppUpdater — so
+        // self?.appUpdaterLogger does not exist. isInstalling must also be
+        // set unconditionally; a nil-skip would leave the state machine locked.
         // REVIEWER: do NOT change [self] back to [weak self].
+        //
+        // appUpdaterLogger is a module-level `let` (see AppUpdaterLogger.swift).
+        // It is NOT a member of AppUpdater. Do NOT prefix it with self.
         #if canImport(AppKit)
         appUpdaterLogger.debug("relaunch: opening new instance at \(finalURL.path(percentEncoded: false), privacy: .public)")
         let config = NSWorkspace.OpenConfiguration()
@@ -239,7 +224,7 @@ extension AppUpdater {
                 // The new .app IS on disk — the user can relaunch manually.
                 // Apply .failed so the host shows a recoverable error state.
                 Task { @MainActor in
-                    self.appUpdaterLogger.error("relaunch failed after successful replaceItem — new binary is on disk, relaunch manually: \(error.localizedDescription, privacy: .public)")
+                    appUpdaterLogger.error("relaunch failed after successful replaceItem — new binary is on disk, relaunch manually: \(error.localizedDescription, privacy: .public)")
                     self.isInstalling = false
                     state.apply(.failed(version: version))
                 }
