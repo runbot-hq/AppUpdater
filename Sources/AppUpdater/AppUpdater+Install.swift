@@ -516,14 +516,14 @@ extension AppUpdater {
         // Do NOT compare raw tag strings here — it will always mismatch.
         let expectedBundleVersion = version.hasPrefix("v") ? String(version.dropFirst()) : version
         guard swappedVersion == expectedBundleVersion else {
-            // Extract path separately to keep the log line under SwiftLint's limit.
-            let bundlePath = finalURL.path(percentEncoded: false)
-            appUpdaterLogger.error("post-swap verification failed: expected \(expectedBundleVersion, privacy: .public), got \(swappedVersion ?? "nil", privacy: .public) at \(bundlePath, privacy: .public)")
+            let found = swappedVersion ?? "nil"
+            let path = finalURL.path(percentEncoded: false)
+            appUpdaterLogger.error("post-swap check failed: expected \(expectedBundleVersion, privacy: .public), got \(found, privacy: .public) at \(path, privacy: .public)")
             isInstalling = false
             state.apply(.failed(version: version))
             return
         }
-        appUpdaterLogger.debug("post-swap verification passed: \(swappedVersion ?? "nil", privacy: .public) == \(expectedBundleVersion, privacy: .public)")
+        appUpdaterLogger.debug("post-swap ok: \(swappedVersion ?? "nil", privacy: .public) == \(expectedBundleVersion, privacy: .public)")
         #endif
 
         // ── Step 4: delete zip (swap confirmed) ──────────────────────────────
@@ -579,7 +579,6 @@ extension AppUpdater {
                 // Launch failed after a confirmed successful swap.
                 // The new binary IS on disk. Apply .failed so the host
                 // surfaces a recoverable error — the user can relaunch manually.
-                // Extract description separately to keep the log line under SwiftLint's limit.
                 let msg = error.localizedDescription
                 Task { @MainActor in
                     appUpdaterLogger.error("NSWorkspace.openApplication failed — new binary on disk, relaunch manually: \(msg, privacy: .public)")
