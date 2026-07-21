@@ -38,9 +38,10 @@ extension AppUpdater {
     /// 3. Unzip into a temporary directory via `/usr/bin/ditto`.
     /// 4. (Optional) Verify `codesign` identity if `skipCodeSignValidation` is `false`.
     /// 5. Replace the running bundle via `FileManager.replaceItemAt` (atomic swap).
-    /// 6. Relaunch the new binary with `/usr/bin/open -n`.
-    /// 7. Delete the zip (spend — relaunch confirmed).
-    /// 8. Terminate this process via `NSApp.terminate`.
+    /// 6. Verify the swapped bundle's version matches the expected version.
+    /// 7. Relaunch the new binary via `NSWorkspace.openApplication` with a completion handler.
+    /// 8. Delete the zip (spend — relaunch confirmed).
+    /// 9. Terminate this process via `NSApp.terminate` inside the relaunch completion handler.
     ///
     /// On any failure `state.apply(.failed(version:))` is called and the
     /// function returns without terminating.
@@ -283,7 +284,8 @@ extension AppUpdater {
         // isInstalling is NOT reset here before entering withZipURL. It is owned
         // by the Task {} body below and released on every exit path inside that
         // Task: on unzip failure, on code-sign abort, on replaceItemAt failure,
-        // on open -n failure, and implicitly on NSApp.terminate (process exits).
+        // on post-swap verification failure, on relaunch failure, and implicitly
+        // on NSApp.terminate (process exits).
         // Resetting it here — before the Task starts its heavy work — would
         // allow a second installAndRelaunch call to enter while the first install
         // is still in flight. Do NOT add isInstalling = false before this call.
@@ -310,43 +312,6 @@ extension AppUpdater {
             // isInstalling and state.apply inside this Task are therefore
             // @MainActor-isolated and race-free. Do NOT add Task.detached or
             // remove the @MainActor annotation from installAndRelaunch.
-            //
-            // isInstalling is reset inside this Task body (asynchronously,
-            // after unzip/replace complete or on any failure path), not here
-            // on the outer synchronous path. This is asymmetric with the
-            // yank-abort path above, which resets isInstalling synchronously
-            // before return. The asymmetry is intentional: the install path
-            // does heavy work (ditto unzip, replaceItemAt, open -n) that must
-            // complete before the guard can be released. Resetting isInstalling
-            // before the Task finishes would allow a second tap to enter while
-            // the first install is still in flight. Do NOT hoist the reset out
-            // of the Task to make the two paths "consistent".
-            //
-            // No withTaskCancellationHandler here — this is intentional.
-            //
-            // The structural observation: if this Task were cancelled before
-            // completing, isInstalling would remain true for the session and
-            // the Install button would appear locked. That would be a real
-            // bug — but only if a caller holds the task handle and calls
-            // .cancel() on it.
-            //
-            // No such caller exists in this codebase. AppUpdater does not
-            // expose the task handle, does not store it, and provides no
-            // cancel-install API. The only path to cancellation would be the
-            // host storing the Void-discarded task handle returned by Task{},
-            // which this library explicitly does not support.
-            //
-            // Additionally, isInstalling is a transient in-memory flag — it
-            // does not survive process termination. The normal terminal state
-            // for a successful install is NSApp.terminate(nil), after which
-            // the flag ceases to exist entirely. There is no "locked forever"
-            // scenario across sessions.
-            //
-            // If AppUpdater ever gains a cancellable install API (e.g. a
-            // public cancelInstall() method or an exposed Task handle), add
-            // withTaskCancellationHandler at that point to reset isInstalling
-            // and apply .idle. Until then, do not add it — the risk is
-            // theoretical and the added complexity is not justified.
             Task {
                 guard let appInZip = await unzipAndLocateApp(zipURL: zipURL, into: tmpDir) else {
                     isInstalling = false
@@ -429,8 +394,36 @@ extension AppUpdater {
         return appInZip
     }
 
-    /// Atomically replaces the running bundle, relaunches via `open -n`, deletes
-    /// the zip once relaunch is confirmed, then terminates via `NSApp.terminate`.
+    /// Atomically replaces the running bundle, verifies the swap, relaunches
+    /// via `NSWorkspace.openApplication`, deletes the zip once relaunch is
+    /// confirmed, then terminates via `NSApp.terminate` inside the completion handler.
+    ///
+    /// ## Why NSWorkspace.openApplication instead of `open -n`
+    ///
+    /// The previous implementation used `Process` to call `/usr/bin/open -n`.
+    /// `open -n` is non-blocking — it returns immediately after spawning the
+    /// new process, before the new instance has actually launched. This created
+    /// a race: `NSApp.terminate(nil)` could kill the old process before the new
+    /// one was fully up, or the new process could start loading the bundle from
+    /// the kernel's vnode cache before the filesystem rename was fully visible.
+    ///
+    /// `NSWorkspace.openApplication(at:configuration:completionHandler:)` calls
+    /// back only after the new process has launched (or failed). By placing
+    /// `NSApp.terminate(nil)` inside the completion handler, the old process
+    /// stays alive until the new one is confirmed running — deterministically.
+    ///
+    /// ## Why post-swap version verification
+    ///
+    /// `replaceItemAt` not throwing is not sufficient proof that the correct
+    /// bundle is now on disk. After the swap, we read `CFBundleShortVersionString`
+    /// from the swapped bundle's `Info.plist` and compare it against the
+    /// expected `version` tag (after stripping a leading `v` from the tag, since
+    /// `CFBundleShortVersionString` never carries a `v` prefix). If they do not
+    /// match, we apply `.failed` and return without relaunching — the wrong
+    /// bundle is on disk and the user must not be launched into it silently.
+    ///
+    /// This is a deterministic check: one synchronous plist read, no timing
+    /// assumption, no sleep. Fixes runbot-hq/run-bot#2193.
     private func replaceAndRelaunch( // skipcq: SW-R1002 — reviewed; sequential install steps, complexity is inherent
         appInZip: URL,
         bundleURL: URL,
@@ -451,12 +444,12 @@ extension AppUpdater {
         // back. Do NOT replace this with removeItem + copyItem (not atomic).
         //
         // replaceItemAt returns the actual post-swap URL (the path where the new
-        // bundle landed). We capture it and use it for open -n below rather than
-        // re-using bundleURL. In practice on a standard macOS /Applications setup
-        // the returned URL is identical to bundleURL — same name, same path. In
-        // edge cases (case-insensitive FS conflict, path rewriting) they may
-        // differ; using the returned URL ensures open -n launches the new binary
-        // rather than the old one. Falls back to bundleURL if nil is returned.
+        // bundle landed). We capture it and use it for the relaunch below rather
+        // than re-using bundleURL. In practice on a standard macOS /Applications
+        // setup the returned URL is identical to bundleURL — same name, same path.
+        // In edge cases (case-insensitive FS conflict, path rewriting) they may
+        // differ; using the returned URL ensures we launch the new binary rather
+        // than the old one. Falls back to bundleURL if nil is returned.
         // Fixes issue #3.
         let finalURL: URL
         do {
@@ -472,49 +465,103 @@ extension AppUpdater {
         // ── Step 2: clean up scratch dir ────────────────────────────────────
         try? fm.removeItem(at: tmpDir)
 
-        // ── Step 3: relaunch ──────────────────────────────────────────────────
+        // ── Step 3: post-swap version verification ───────────────────────────
+        // replaceItemAt not throwing is necessary but not sufficient — it only
+        // confirms the filesystem rename completed. We also verify that the
+        // bundle now on disk is actually the version we intended to install.
+        //
+        // We read CFBundleShortVersionString from the swapped bundle's Info.plist
+        // and compare it against the expected version tag. GitHub tags carry a
+        // leading "v" (e.g. "v0.7.3") while CFBundleShortVersionString is always
+        // "0.7.3" — we strip the leading "v" before comparing.
+        //
+        // This is a synchronous plist read on a local bundle — completes in
+        // microseconds. Do NOT make this async or wrap it in a Task.
+        //
+        // On mismatch we apply .failed and return without relaunching. The wrong
+        // bundle is on disk. The user sees a recoverable error and can retry or
+        // use the curl install command. We do NOT attempt to roll back — rollback
+        // is not atomic and could leave the bundle in a worse state. .failed is
+        // the correct terminal state here.
+        //
+        // REVIEWER: do NOT remove this step on the grounds that replaceItemAt
+        // "always works". This guard is the fix for runbot-hq/run-bot#2193 —
+        // the flaky relaunch-into-old-version bug. The cost is one plist read.
         #if canImport(AppKit)
-        let relaunchTask = Process()
-        relaunchTask.executableURL = URL(filePath: "/usr/bin/open")
-        relaunchTask.arguments = ["-n", finalURL.path(percentEncoded: false)]
-        do {
-            try relaunchTask.run()
-        } catch {
-            // `open -n` failed AFTER replaceItem succeeded.
-            // The new .app IS on disk.
-            // Apply .failed so the host shows a recoverable error state.
-            // The user can relaunch manually — the new binary is already installed.
-            appUpdaterLogger.error("open -n failed after successful replaceItem — new binary is on disk, relaunch manually: \(error.localizedDescription, privacy: .public)")
+        let infoPlistURL = finalURL.appending(path: "Contents/Info.plist")
+        let swappedInfo = NSDictionary(contentsOf: infoPlistURL)
+        let swappedVersion = swappedInfo?["CFBundleShortVersionString"] as? String
+        // Strip leading "v" from the tag for comparison — CFBundleShortVersionString
+        // is always "X.Y.Z", never "vX.Y.Z". GitHub tags are always "vX.Y.Z".
+        // Do NOT compare raw tag strings here — it will always mismatch.
+        let expectedBundleVersion = version.hasPrefix("v") ? String(version.dropFirst()) : version
+        guard swappedVersion == expectedBundleVersion else {
+            appUpdaterLogger.error("post-swap verification failed: expected \(expectedBundleVersion, privacy: .public) but found \(swappedVersion ?? "nil", privacy: .public) at \(finalURL.path(percentEncoded: false), privacy: .public) — aborting relaunch")
             isInstalling = false
             state.apply(.failed(version: version))
             return
         }
+        appUpdaterLogger.debug("post-swap verification passed: \(swappedVersion ?? "nil", privacy: .public) == \(expectedBundleVersion, privacy: .public)")
+        #endif
 
-        // ── Step 4: delete zip (relaunch confirmed) ───────────────────────────
+        // ── Step 4: delete zip (swap confirmed) ──────────────────────────────
+        // The zip is deleted here — after the swap is verified but before
+        // relaunch — rather than after open fires (the old position was step 4
+        // after open -n). This is intentional:
+        // - The swap is confirmed correct, so the zip is spent regardless of
+        //   whether the relaunch succeeds.
+        // - Deleting before relaunch ensures the new process never sees a stale
+        //   zip in ~/Library/Caches on its launch-time checkAndHandle call.
+        // - If the relaunch fails, .failed is applied and the user can retry;
+        //   the zip being gone means the next retry will re-download, which is
+        //   correct — the old zip was already consumed by the successful swap.
         try? fm.removeItem(at: zipURL)
 
-        // ── Step 5: terminate ────────────────────────────────────────────────
-        // isInstalling is NOT reset before NSApp.terminate(nil) — this is
-        // deliberate and correct. Do not add `isInstalling = false` here.
+        // ── Step 5: relaunch via NSWorkspace ────────────────────────────────
+        // NSWorkspace.openApplication(at:configuration:completionHandler:) is
+        // used instead of the previous `Process("/usr/bin/open -n")` approach.
         //
-        // The concern a reviewer may raise: "if applicationShouldTerminate
-        // returns .terminateLater or .terminateCancel, isInstalling stays true
-        // and the button is locked forever."
+        // The key difference: the completion handler is called only after the
+        // new process has launched (or failed to launch). By placing
+        // NSApp.terminate(nil) inside the completion handler, the old process
+        // stays alive until the new instance is confirmed running.
         //
-        // That scenario does not exist in this app. RunBot does not implement
-        // applicationShouldTerminate — confirmed at the call site, zero
-        // implementations in the codebase. NSApp.terminate(nil) is therefore
-        // unconditional: the process always exits, the heap is always freed,
-        // and isInstalling ceases to exist the moment terminate is called.
+        // The previous `open -n` via Process was non-blocking: relaunchTask.run()
+        // returned immediately after spawning, and NSApp.terminate fired right
+        // after — racing with the new process startup and the kernel's vnode
+        // cache for the just-swapped bundle. This was the root cause of
+        // runbot-hq/run-bot#2193.
         //
-        // isInstalling is a transient in-memory flag on a @MainActor class.
-        // It is never persisted to disk, UserDefaults, or any external store.
-        // It cannot survive process termination. There is no "locked forever"
-        // scenario — there is no next session in which the lock could exist.
+        // completionHandler is called on an arbitrary queue — we hop back to
+        // @MainActor for NSApp.terminate, which must be called on the main thread.
         //
-        // If RunBot ever gains a terminate delegate that can defer or cancel
-        // termination, revisit this. Until then, do not add the reset.
-        NSApp.terminate(nil)
+        // On launch failure: the completion handler receives a non-nil error.
+        // We log it and apply .failed. The new binary IS on disk (swap was
+        // verified in step 3) — the user can relaunch manually.
+        //
+        // isInstalling is NOT reset before NSApp.terminate(nil) on the success
+        // path — this is correct. The process is about to exit; the flag
+        // ceases to exist. Do NOT add isInstalling = false on the success path.
+        #if canImport(AppKit)
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewInstance = true
+        NSWorkspace.shared.openApplication(at: finalURL, configuration: config) { [weak self] _, error in
+            if let error {
+                // Launch failed after a confirmed successful swap.
+                // The new binary IS on disk. Apply .failed so the host
+                // surfaces a recoverable error — the user can relaunch manually.
+                Task { @MainActor [weak self] in
+                    self?.appUpdaterLogger.error("NSWorkspace.openApplication failed after verified swap — new binary is on disk, relaunch manually: \(error.localizedDescription, privacy: .public)")
+                    self?.isInstalling = false
+                    state.apply(.failed(version: version))
+                }
+            } else {
+                // New instance confirmed launched — terminate the old process.
+                Task { @MainActor in
+                    NSApp.terminate(nil)
+                }
+            }
+        }
         #endif
     }
 }
