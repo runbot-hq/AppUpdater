@@ -122,6 +122,8 @@ extension AppUpdater {
             // @MainActor classes synthesise Sendable conformance in Swift 6 —
             // capturing `self` directly is safe here without nonisolated(unsafe).
             Task { @MainActor in
+                guard self.automaticUpdatesEnabled else { return }
+
                 let beta = self.betaChannelProvider()
                 switch await self.checkForUpdate(betaChannel: beta) {
                 case .updateAvailable(let release):
