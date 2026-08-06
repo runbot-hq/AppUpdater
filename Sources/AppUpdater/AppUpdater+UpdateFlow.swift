@@ -11,6 +11,11 @@ extension AppUpdater {
 
     /// Runs a full update check and handles the result.
     ///
+    /// This is the single gate for `automaticUpdatesEnabled`: returns immediately
+    /// when the flag is `false`, covering every entry point — launch-time check,
+    /// Settings-entry check, and the background scheduler callback (which calls
+    /// this method directly). The scheduler lifecycle is not affected.
+    ///
     /// On `.updateAvailable` the release is downloaded/cached via `handle`.
     /// `.upToDate` is a no-op here — the background scheduler owns the
     /// stale-row-clearing policy.
@@ -18,6 +23,7 @@ extension AppUpdater {
     /// triage does not require a proxy or network capture to distinguish
     /// offline failures from API rejections.
     public func checkAndHandle(state: any UpdateStateProviding) async {
+        guard automaticUpdatesEnabled else { return }
         let beta = betaChannelProvider()
         switch await checkForUpdate(betaChannel: beta) {
         case .updateAvailable(let release):

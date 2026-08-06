@@ -39,6 +39,11 @@ extension AppUpdater {
     /// Call once from the host's `AppDelegate` after the startup sequence
     /// completes.
     ///
+    /// The scheduler lifecycle (registration, interval, shouldDefer guard,
+    /// completion ordering) is completely unchanged. When `automaticUpdatesEnabled`
+    /// is `false` the Task calls `checkAndHandle` which returns immediately —
+    /// the scheduler itself is unaffected.
+    ///
     /// - Parameter state: The host update-state object to update.
     @MainActor
     public func scheduleBackgroundCheck(state: any UpdateStateProviding) { // skipcq: SW-R1002 — reviewed; complexity acceptable for this scheduler setup
@@ -121,48 +126,12 @@ extension AppUpdater {
             //
             // @MainActor classes synthesise Sendable conformance in Swift 6 —
             // capturing `self` directly is safe here without nonisolated(unsafe).
+            //
+            // automaticUpdatesEnabled is honoured via checkAndHandle, which returns
+            // immediately when the flag is false. The scheduler lifecycle is not
+            // affected — see AppUpdater.automaticUpdatesEnabled doc comment.
             Task { @MainActor in
-                let beta = self.betaChannelProvider()
-                switch await self.checkForUpdate(betaChannel: beta) {
-                case .updateAvailable(let release):
-                    await self.handle(release, state: state)
-
-                case .upToDate:
-                    // ✅ REVIEWED: unconditional .idle here is correct. Do NOT add a
-                    // .downloading/.ready guard (as the .failed arm has) without reading
-                    // this comment in full.
-                    //
-                    // The concern is: a download Task is in flight; .upToDate fires and
-                    // wipes state to .idle; the Task later applies .ready over .idle.
-                    // This is NOT a bug. .upToDate means the live GitHub API just
-                    // confirmed no newer release exists. For that to fire while a
-                    // download is in flight, the release being downloaded would have to
-                    // be simultaneously absent from the API — i.e. deleted from GitHub
-                    // mid-download. That scenario is not defended against by design
-                    // (Principle 5: unsupported is correct). The .failed arm has a guard
-                    // because a transient network failure is common; a release deletion
-                    // mid-download is not. Adding the guard here is Principle 4 sprawl.
-                    // See issue #1859.
-                    state.apply(.idle)
-
-                case .failed(let error):
-                    // Log at debug level — matches checkAndHandle's precedent and ensures
-                    // background network failures (HTTP 429/403, TLS errors, etc.) are
-                    // visible in Console.app for triage. Without this, a 24-hour cycle
-                    // failure is completely silent.
-                    appUpdaterLogger.debug("background check failed: \(String(describing: error), privacy: .public)")
-                    // .failed here conflates genuine network failure, rate-limit (HTTP 429/403),
-                    // and auth errors — all map to .failed(.noReleasesFound) upstream. This is
-                    // a known accepted limitation; see UpdateCheckError.noReleasesFound in
-                    // UpdateChecker.swift for the full rationale and the tracking note.
-                    // A transient failure must NOT clear a ready-to-install update.
-                    switch state.currentPhase {
-                    case .ready:
-                        break
-                    default:
-                        state.apply(.idle)
-                    }
-                }
+                await self.checkAndHandle(state: state)
             }
         }
 

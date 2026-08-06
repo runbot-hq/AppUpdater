@@ -180,6 +180,22 @@ public final class AppUpdater {
     /// validation; integrity is guaranteed by Ed25519 signature verification.
     public var skipCodeSignValidation: Bool = true
 
+    /// Whether automatic update checks are enabled.
+    ///
+    /// When `false`, `checkAndHandle` returns immediately without contacting
+    /// GitHub. This is the single gate that covers every entry point:
+    /// launch-time check, Settings-entry check, and the background scheduler
+    /// callback (which calls `checkAndHandle` directly and therefore also
+    /// becomes a no-op while this flag is false).
+    ///
+    /// The scheduler itself remains registered and its lifecycle is not
+    /// affected — it simply fires `checkAndHandle` which exits early.
+    ///
+    /// Defaults to `true` so out-of-the-box behaviour is unchanged.
+    /// Set from the host app when the user toggles the automatic-updates
+    /// preference.
+    public var automaticUpdatesEnabled: Bool = true
+
     // MARK: - Runtime flags
 
     /// `true` while `installAndRelaunch` is mid-flight — guards a double-tap.
