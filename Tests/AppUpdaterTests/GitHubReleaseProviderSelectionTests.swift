@@ -1,5 +1,6 @@
 // GitHubReleaseProviderSelectionTests.swift
 // AppUpdaterTests
+import Foundation
 import Testing
 @testable import AppUpdater
 
