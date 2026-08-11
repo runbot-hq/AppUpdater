@@ -117,4 +117,34 @@ struct GitHubReleaseProviderSelectionTests {
         let result = provider.latestMatchingRelease(from: [], betaChannel: false)
         #expect(result == nil)
     }
+
+    // MARK: - Composed: provider → evaluate (channel downgrade)
+
+    /// Belt-and-suspenders: pipes `latestMatchingRelease` output directly into
+    /// `UpdateChecker.evaluate` to confirm the full stable-channel path offers
+    /// a stable release to a user currently on a prerelease.
+    ///
+    /// The two layers are individually tested in isolation; this test locks
+    /// their interaction so a future seam change between provider and evaluator
+    /// is caught without having to trace the integration manually.
+    @Test func stableChannel_offersStableToInstalledPrerelease() throws {
+        let releases = try [
+            release("v0.9.9",         prerelease: false),
+            release("v1.0.0-beta.2",  prerelease: true),
+        ]
+        let candidate = provider.latestMatchingRelease(from: releases, betaChannel: false)
+        let fetchResult = ReleaseFetchResult.fetched(
+            candidate.map { AvailableRelease(tagName: $0.tagName, assets: $0.assets, signatureURL: nil) }
+        )
+        let result = UpdateChecker.evaluate(
+            fetchResult: fetchResult,
+            currentVersion: "v1.0.0-beta.1",
+            betaChannel: false
+        )
+        guard case .updateAvailable(let offered) = result else {
+            Issue.record("Expected .updateAvailable(v0.9.9) for stable-channel downgrade, got \(result)")
+            return
+        }
+        #expect(offered.tagName == "v0.9.9")
+    }
 }
