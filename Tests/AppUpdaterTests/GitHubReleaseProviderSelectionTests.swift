@@ -95,7 +95,7 @@ struct GitHubReleaseProviderSelectionTests {
     }
 
     /// Beta channel selects the newest among multiple prereleases.
-    @Test func betaChannel_multiplePreleases_selectsNewest() throws {
+    @Test func betaChannel_multiplePrereleases_selectsNewest() throws {
         let releases = try [
             release("v0.7.9-beta.70", prerelease: true),
             release("v0.7.9-beta.72", prerelease: true),
