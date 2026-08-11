@@ -55,7 +55,9 @@ public protocol ReleaseProvider: Sendable {
     ///
     /// - Parameters:
     ///   - repo: `"owner/name"` GitHub repository slug.
-    ///   - betaChannel: When `true`, pre-release builds are candidates.
+    ///   - betaChannel: Selects the release channel. When `true`, only GitHub
+    ///     pre-releases are candidates; when `false`, only stable releases are
+    ///     candidates.
     ///   - assetName: Maps a tag name to the expected zip asset filename;
     ///     used to resolve the signature sidecar URL
     ///     (`<assetName(tagName)>.sig`) from the release's asset list.

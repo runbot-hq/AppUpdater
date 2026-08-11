@@ -239,27 +239,30 @@ public struct GitHubReleaseProvider: ReleaseProvider {
         }
     }
 
-    /// Sorts `releases` by semver (newest first) and returns the first entry
-    /// that matches `betaChannel`.
+    /// Returns the newest release from `releases` that matches `betaChannel`,
+    /// or `nil` when no release in the channel exists.
     ///
-    /// Returns `nil` when no release matches the channel filter — i.e. the
-    /// caller is on the stable channel and every release is a pre-release.
-    /// This `nil` means **no channel match**, not a fetch failure; the two
-    /// cases are kept separate so callers can map them to different outcomes
+    /// Channels are mutually exclusive:
+    /// - `betaChannel == false` → only releases where `prerelease == false`
+    /// - `betaChannel == true`  → only releases where `prerelease == true`
+    ///
+    /// Filtering happens **before** sorting so stable releases never
+    /// participate in beta-channel candidate ordering and vice versa.
+    /// This prevents a stable `v0.7.9` from outranking `v0.7.9-beta.71`
+    /// when the user is on the beta channel.
+    ///
+    /// Returns `nil` when the filtered set is empty — e.g. a beta user on a
+    /// repo that has published no prereleases. This `nil` means
+    /// **no channel match**, not a fetch failure; the two cases are kept
+    /// separate so callers can map them to different outcomes
     /// (`.upToDate` vs `.failed`).
-    private func latestMatchingRelease(
+    internal func latestMatchingRelease(
         from releases: [Release],
         betaChannel: Bool
     ) -> Release? {
-        // Sorted rather than max-scan by design — runs at most once per 24 hours on
-        // ≤ 100 items. The clarity of .first on a sorted list outweighs the irrelevant
-        // perf difference. Do not "optimise" this.
-        let sorted = releases.sorted { UpdateChecker.isNewer($0.tagName, than: $1.tagName) }
-        // `betaChannel ? true : !$0.prerelease` is intentional: when betaChannel is
-        // true the predicate is unconditionally true, making this equivalent to
-        // sorted.first — beta users get the newest release regardless of prerelease
-        // flag. The alternative (two separate branches) adds control flow complexity
-        // with no correctness or performance benefit at ≤ 100 items. Do not refactor.
-        return sorted.first(where: { betaChannel ? true : !$0.prerelease })
+        releases
+            .filter { $0.prerelease == betaChannel }
+            .sorted { UpdateChecker.isNewer($0.tagName, than: $1.tagName) }
+            .first
     }
 }
