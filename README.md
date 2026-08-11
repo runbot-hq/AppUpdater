@@ -30,6 +30,7 @@ distributed via GitHub Releases outside the Mac App Store.
 - [Key pair setup](#key-pair-setup)
 - [Distribution assumptions](#distribution-assumptions)
 - [Trust model](#trust-model)
+- [Release channels](#release-channels)
 - [Known limitations](#known-limitations)
 - [Design principles](#design-principles)
 - [Comparison](#comparison)
@@ -260,6 +261,32 @@ updater.skipCodeSignValidation = false
 ```
 
 When enabled, `codesign -dvvv` is run on both the running bundle and the downloaded bundle. The `Authority=` identity strings must match exactly or the install is aborted with `.failed`.
+
+## Release channels
+
+AppUpdater selects releases from one mutually exclusive channel before
+comparing versions:
+
+| `betaChannelProvider()` | Eligible GitHub releases |
+|---|---|
+| `false` | Stable releases where `prerelease == false` |
+| `true` | Pre-releases where `prerelease == true` |
+
+Version ordering happens only within the selected channel. A stable release
+is therefore never offered to a beta-channel user, and a pre-release is never
+offered to a stable-channel user. If the selected channel has no releases,
+AppUpdater reports no available update.
+
+Supported version formats are:
+
+- Stable: `vMAJOR.MINOR.PATCH`
+- Beta: `vMAJOR.MINOR.PATCH-beta.N`
+
+For example, a beta-channel user running `v0.7.9-beta.70` will select
+`v0.7.9-beta.71` and ignore stable `v0.7.9`.
+
+Pre-release ordering currently supports only the `beta.N` suffix. See
+[Known limitations](#known-limitations).
 
 ## Known limitations
 
