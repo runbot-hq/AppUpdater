@@ -76,10 +76,8 @@ struct GitHubReleaseProviderDecodeTests {
     }
 
     /// Decoding fails when `tag_name` is absent — `Release` is not constructed
-    /// with a default empty string.
-    ///
-    /// `#require(throws:)` is used instead of `#expect(throws:)` so that a
-    /// future default value added to `tagName` causes an immediate hard failure.
+    /// with a default empty string, so decoding a payload missing the required
+    /// field must produce an error.
     @Test func missingTagNameThrows() {
         let json = Data("""
         [{ "prerelease": false, "assets": [] }]
