@@ -5,120 +5,160 @@ import Testing
 
 // MARK: - UpdateCheckerIsNewerTests
 
-/// Exhaustive matrix tests for `UpdateChecker.isNewer(_:than:)`.
+/// Single comparison-contract test for `UpdateChecker.isNewer(_:than:)`.
 ///
-/// Each test covers a distinct semver comparison dimension. No async,
-/// no network, no `DispatchQueue`. Pure value-level logic tests.
+/// All semver dimensions (major/minor/patch ordering, numeric vs lexicographic,
+/// v-prefix stripping, stable-vs-prerelease precedence, beta ordering, partial
+/// and malformed versions) are covered as data-driven cases in one loop.
 @Suite("UpdateChecker.isNewer")
 struct UpdateCheckerIsNewerTests {
 
-    // MARK: - Major
+    // MARK: - Comparison contract
 
-    @Test func majorVersionHigher_returnsTrue() {
-        #expect(UpdateChecker.isNewer("2.0.0", than: "1.0.0") == true)
-    }
+    @Test
+    func comparisonContract() {
+        struct Case {
+            let candidate: String
+            let current: String
+            let expected: Bool
+            let label: String
+        }
 
-    @Test func majorVersionLower_returnsFalse() {
-        #expect(UpdateChecker.isNewer("1.0.0", than: "2.0.0") == false)
-    }
+        let cases: [Case] = [
+            Case(
+                candidate: "2.0.0",
+                current: "1.0.0",
+                expected: true,
+                label: "higher major"
+            ),
+            Case(
+                candidate: "1.0.0",
+                current: "2.0.0",
+                expected: false,
+                label: "lower major"
+            ),
+            Case(
+                candidate: "1.1.0",
+                current: "1.0.0",
+                expected: true,
+                label: "higher minor"
+            ),
+            Case(
+                candidate: "1.0.0",
+                current: "1.1.0",
+                expected: false,
+                label: "lower minor"
+            ),
+            Case(
+                candidate: "1.10.0",
+                current: "1.9.0",
+                expected: true,
+                label: "numeric minor comparison"
+            ),
+            Case(
+                candidate: "1.0.1",
+                current: "1.0.0",
+                expected: true,
+                label: "higher patch"
+            ),
+            Case(
+                candidate: "1.0.0",
+                current: "1.0.1",
+                expected: false,
+                label: "lower patch"
+            ),
+            Case(
+                candidate: "1.0.0",
+                current: "1.0.0",
+                expected: false,
+                label: "equal stable"
+            ),
+            Case(
+                candidate: "v2.0.0",
+                current: "1.0.0",
+                expected: true,
+                label: "candidate v prefix"
+            ),
+            Case(
+                candidate: "2.0.0",
+                current: "v1.0.0",
+                expected: true,
+                label: "current v prefix"
+            ),
+            Case(
+                candidate: "1.0.0",
+                current: "1.0.0-beta.1",
+                expected: true,
+                label: "stable beats same-base beta"
+            ),
+            Case(
+                candidate: "1.0.0-beta.1",
+                current: "1.0.0",
+                expected: false,
+                label: "beta does not beat stable"
+            ),
+            Case(
+                candidate: "1.0.0-beta.2",
+                current: "1.0.0-beta.1",
+                expected: true,
+                label: "higher beta"
+            ),
+            Case(
+                candidate: "1.0.0-beta.1",
+                current: "1.0.0-beta.2",
+                expected: false,
+                label: "lower beta"
+            ),
+            Case(
+                candidate: "1.0.0-beta.10",
+                current: "1.0.0-beta.9",
+                expected: true,
+                label: "numeric beta comparison"
+            ),
+            Case(
+                candidate: "1.0.0-beta.2",
+                current: "1.0.0-beta.2",
+                expected: false,
+                label: "equal beta"
+            ),
+            Case(
+                candidate: "2.0.0-beta.1",
+                current: "1.9.9",
+                expected: true,
+                label: "higher-base beta beats lower stable"
+            ),
+            Case(
+                candidate: "2.0",
+                current: "1.9",
+                expected: true,
+                label: "partial versions"
+            ),
+            Case(
+                candidate: "",
+                current: "",
+                expected: false,
+                label: "empty versions"
+            ),
+            Case(
+                candidate: "v",
+                current: "v",
+                expected: false,
+                label: "prefix without version"
+            )
+        ]
 
-    // MARK: - Minor
-
-    @Test func minorVersionHigher_returnsTrue() {
-        #expect(UpdateChecker.isNewer("1.1.0", than: "1.0.0") == true)
-    }
-
-    @Test func minorVersionLower_returnsFalse() {
-        #expect(UpdateChecker.isNewer("1.0.0", than: "1.1.0") == false)
-    }
-
-    /// Lexicographic comparison gives "1.10.0" < "1.9.0" — numeric comparison must return true.
-    @Test func twoDigitMinorComponent_numericNotLexicographic() {
-        #expect(UpdateChecker.isNewer("1.10.0", than: "1.9.0") == true)
-    }
-
-    // MARK: - Patch
-
-    @Test func patchVersionHigher_returnsTrue() {
-        #expect(UpdateChecker.isNewer("1.0.1", than: "1.0.0") == true)
-    }
-
-    @Test func patchVersionLower_returnsFalse() {
-        #expect(UpdateChecker.isNewer("1.0.0", than: "1.0.1") == false)
-    }
-
-    // MARK: - Equal versions
-
-    @Test func identicalVersions_returnsFalse() {
-        #expect(UpdateChecker.isNewer("1.0.0", than: "1.0.0") == false)
-    }
-
-    // MARK: - v-prefix stripping
-
-    @Test func vPrefixedCandidate_strippedBeforeCompare() {
-        #expect(UpdateChecker.isNewer("v2.0.0", than: "1.0.0") == true)
-    }
-
-    @Test func vPrefixedCurrent_strippedBeforeCompare() {
-        #expect(UpdateChecker.isNewer("2.0.0", than: "v1.0.0") == true)
-    }
-
-    @Test func bothVPrefixed_strippedBeforeCompare() {
-        #expect(UpdateChecker.isNewer("v2.0.0", than: "v1.0.0") == true)
-    }
-
-    // MARK: - Stable vs. pre-release
-
-    /// Stable 1.0.0 must be considered newer than 1.0.0-beta.1.
-    @Test func stable_newerThanPrerelease_sameBase() {
-        #expect(UpdateChecker.isNewer("1.0.0", than: "1.0.0-beta.1") == true)
-    }
-
-    /// A pre-release must not be considered newer than its stable base.
-    @Test func prerelease_notNewerThanStable_sameBase() {
-        #expect(UpdateChecker.isNewer("1.0.0-beta.1", than: "1.0.0") == false)
-    }
-
-    // MARK: - Beta ordering
-
-    /// beta.2 must be newer than beta.1 when the X.Y.Z base is identical.
-    @Test func betaIndex2_newerThanBetaIndex1() {
-        #expect(UpdateChecker.isNewer("1.0.0-beta.2", than: "1.0.0-beta.1") == true)
-    }
-
-    @Test func betaIndex1_notNewerThanBetaIndex2() {
-        #expect(UpdateChecker.isNewer("1.0.0-beta.1", than: "1.0.0-beta.2") == false)
-    }
-
-    /// Numeric beta ordering: beta.10 must beat beta.9 (lexicographic would fail this).
-    @Test func betaIndex10_newerThanBetaIndex9() {
-        #expect(UpdateChecker.isNewer("1.0.0-beta.10", than: "1.0.0-beta.9") == true)
-    }
-
-    /// The same beta version is not newer than itself.
-    @Test func sameBetaVersion_returnsFalse() {
-        #expect(UpdateChecker.isNewer("1.0.0-beta.2", than: "1.0.0-beta.2") == false)
-    }
-
-    // MARK: - Cross-version beta vs stable
-
-    /// A beta of a higher version is still newer than the lower stable.
-    @Test func higherVersionBeta_newerThanLowerStable() {
-        #expect(UpdateChecker.isNewer("2.0.0-beta.1", than: "1.9.9") == true)
-    }
-
-    // MARK: - Edge cases
-
-    @Test func emptyStrings_returnsFalse() {
-        #expect(UpdateChecker.isNewer("", than: "") == false)
-    }
-
-    @Test func singleVPrefix_returnsFalse() {
-        #expect(UpdateChecker.isNewer("v", than: "v") == false)
-    }
-
-    @Test func partialVersion_twoComponents_comparedCorrectly() {
-        // "2.0" parsed as 2.0.0 vs "1.9" parsed as 1.9.0
-        #expect(UpdateChecker.isNewer("2.0", than: "1.9") == true)
+        for testCase in cases {
+            #expect(
+                UpdateChecker.isNewer(
+                    testCase.candidate,
+                    than: testCase.current
+                ) == testCase.expected,
+                """
+                \(testCase.label):
+                candidate=\(testCase.candidate)
+                current=\(testCase.current)
+                """
+            )
+        }
     }
 }
