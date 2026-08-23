@@ -6,14 +6,27 @@ import Testing
 
 // MARK: - GitHubReleaseProviderSelectionTests
 
-/// Tests for `GitHubReleaseProvider.latestMatchingRelease(from:betaChannel:)`.
+/// Channel-selection contract for `GitHubReleaseProvider.latestMatchingRelease(from:betaChannel:)`.
 ///
 /// Channels are mutually exclusive: beta channel returns only prereleases,
-/// stable channel returns only stable releases. These tests lock in that
-/// contract and cover the specific regression from runbot-hq/run-bot#2715
-/// where stable `v0.7.9` was incorrectly offered to a beta user over
-/// `v0.7.9-beta.71`.
+/// stable channel returns only stable releases. The matrix locks in that
+/// contract, including the regression from runbot-hq/run-bot#2715 where
+/// stable `v0.7.9` was incorrectly offered to a beta user over `v0.7.9-beta.71`.
 struct GitHubReleaseProviderSelectionTests {
+
+    // MARK: - Fixtures
+
+    private struct ReleaseFixture {
+        let tag: String
+        let prerelease: Bool
+    }
+
+    private struct SelectionCase {
+        let label: String
+        let releases: [ReleaseFixture]
+        let betaChannel: Bool
+        let expectedTag: String?
+    }
 
     // MARK: - Helpers
 
@@ -28,94 +41,72 @@ struct GitHubReleaseProviderSelectionTests {
         return try JSONDecoder().decode([GitHubReleaseProvider.Release].self, from: Data(json.utf8))[0]
     }
 
-    // MARK: - Reported regression (run-bot#2715)
+    // MARK: - Channel selection contract
 
-    /// Beta channel must select the newest prerelease and ignore a stable
-    /// release that has higher SemVer precedence.
-    ///
-    /// Regression fixture: installed `v0.7.9-beta.70`, available
-    /// `v0.7.9-beta.71` and `v0.7.9`. Without the channel filter, SemVer
-    /// sort promotes `v0.7.9` first. With the filter only prereleases are
-    /// candidates, so `v0.7.9-beta.71` is selected.
-    @Test func betaChannel_selectsNewestPrerelease_ignoresStable() throws {
-        let releases = try [
-            release("v0.7.9",         prerelease: false),
-            release("v0.7.9-beta.71", prerelease: true),
-            release("v0.7.9-beta.70", prerelease: true),
+    @Test func channelSelectionContract() throws {
+        let cases: [SelectionCase] = [
+            SelectionCase(
+                label: "beta regression ignores stable",
+                releases: [
+                    .init(tag: "v0.7.9", prerelease: false),
+                    .init(tag: "v0.7.9-beta.71", prerelease: true),
+                    .init(tag: "v0.7.9-beta.70", prerelease: true)
+                ],
+                betaChannel: true,
+                expectedTag: "v0.7.9-beta.71"
+            ),
+            SelectionCase(
+                label: "stable ignores newer beta",
+                releases: [
+                    .init(tag: "v0.8.0-beta.1", prerelease: true),
+                    .init(tag: "v0.7.9", prerelease: false)
+                ],
+                betaChannel: false,
+                expectedTag: "v0.7.9"
+            ),
+            SelectionCase(
+                label: "stable with only betas",
+                releases: [.init(tag: "v0.7.9-beta.71", prerelease: true)],
+                betaChannel: false,
+                expectedTag: nil
+            ),
+            SelectionCase(
+                label: "beta with only stable",
+                releases: [.init(tag: "v0.7.9", prerelease: false)],
+                betaChannel: true,
+                expectedTag: nil
+            ),
+            SelectionCase(
+                label: "newest beta selected",
+                releases: [
+                    .init(tag: "v0.7.9-beta.70", prerelease: true),
+                    .init(tag: "v0.7.9-beta.72", prerelease: true),
+                    .init(tag: "v0.7.9-beta.71", prerelease: true)
+                ],
+                betaChannel: true,
+                expectedTag: "v0.7.9-beta.72"
+            ),
+            SelectionCase(
+                label: "empty stable",
+                releases: [],
+                betaChannel: false,
+                expectedTag: nil
+            ),
+            SelectionCase(
+                label: "empty beta",
+                releases: [],
+                betaChannel: true,
+                expectedTag: nil
+            )
         ]
-        let result = provider.latestMatchingRelease(from: releases, betaChannel: true)
-        #expect(result?.tagName == "v0.7.9-beta.71")
-    }
 
-    // MARK: - Stable channel
-
-    /// Stable channel selects the stable release from the same fixture.
-    @Test func stableChannel_selectsStableRelease() throws {
-        let releases = try [
-            release("v0.7.9",         prerelease: false),
-            release("v0.7.9-beta.71", prerelease: true),
-            release("v0.7.9-beta.70", prerelease: true),
-        ]
-        let result = provider.latestMatchingRelease(from: releases, betaChannel: false)
-        #expect(result?.tagName == "v0.7.9")
-    }
-
-    /// Stable channel ignores a prerelease that is numerically newer.
-    @Test func stableChannel_ignoresNumericallyNewerPrerelease() throws {
-        let releases = try [
-            release("v0.8.0-beta.1", prerelease: true),
-            release("v0.7.9",        prerelease: false),
-        ]
-        let result = provider.latestMatchingRelease(from: releases, betaChannel: false)
-        #expect(result?.tagName == "v0.7.9")
-    }
-
-    /// Stable channel with only prereleases returns nil.
-    @Test func stableChannel_onlyPrereleases_returnsNil() throws {
-        let releases = try [
-            release("v0.7.9-beta.71", prerelease: true),
-            release("v0.7.9-beta.70", prerelease: true),
-        ]
-        let result = provider.latestMatchingRelease(from: releases, betaChannel: false)
-        #expect(result == nil)
-    }
-
-    // MARK: - Beta channel
-
-    /// Beta channel with only stable releases returns nil.
-    /// This locks in the product decision: beta means beta-only, not
-    /// "early access plus stable".
-    @Test func betaChannel_onlyStableReleases_returnsNil() throws {
-        let releases = try [
-            release("v0.7.9", prerelease: false),
-            release("v0.7.8", prerelease: false),
-        ]
-        let result = provider.latestMatchingRelease(from: releases, betaChannel: true)
-        #expect(result == nil)
-    }
-
-    /// Beta channel selects the newest among multiple prereleases.
-    @Test func betaChannel_multiplePrereleases_selectsNewest() throws {
-        let releases = try [
-            release("v0.7.9-beta.70", prerelease: true),
-            release("v0.7.9-beta.72", prerelease: true),
-            release("v0.7.9-beta.71", prerelease: true),
-        ]
-        let result = provider.latestMatchingRelease(from: releases, betaChannel: true)
-        #expect(result?.tagName == "v0.7.9-beta.72")
-    }
-
-    // MARK: - Empty input
-
-    /// Empty release list returns nil for both channels.
-    @Test func emptyReleases_betaChannel_returnsNil() {
-        let result = provider.latestMatchingRelease(from: [], betaChannel: true)
-        #expect(result == nil)
-    }
-
-    @Test func emptyReleases_stableChannel_returnsNil() {
-        let result = provider.latestMatchingRelease(from: [], betaChannel: false)
-        #expect(result == nil)
+        for testCase in cases {
+            let releases = try testCase.releases.map { fixture in
+                try release(fixture.tag, prerelease: fixture.prerelease)
+            }
+            let result = provider.latestMatchingRelease(from: releases, betaChannel: testCase.betaChannel)
+            #expect(result?.tagName == testCase.expectedTag, Comment(rawValue: testCase.label))
+        }
     }
 
     // MARK: - Composed: provider → evaluate (channel downgrade)
@@ -129,8 +120,8 @@ struct GitHubReleaseProviderSelectionTests {
     /// is caught without having to trace the integration manually.
     @Test func stableChannel_offersStableToInstalledPrerelease() throws {
         let releases = try [
-            release("v0.9.9",         prerelease: false),
-            release("v1.0.0-beta.2",  prerelease: true),
+            release("v0.9.9", prerelease: false),
+            release("v1.0.0-beta.2", prerelease: true),
         ]
         let candidate = provider.latestMatchingRelease(from: releases, betaChannel: false)
         let fetchResult = ReleaseFetchResult.fetched(
