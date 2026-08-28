@@ -60,7 +60,7 @@ public enum UpdateChecker {
         /// pre-release suffix (anything other than `beta.N`) sets `betaIndex`
         /// to `nil` while still marking `isPrerelease = true`.
         init(_ version: String) { // skipcq: SW-R1002 — reviewed; complexity acceptable for this version parser
-            let versionString = version.hasPrefix("v") ? String(version.dropFirst()) : version
+            let versionString = UpdateChecker.bundleVersion(forTag: version)
             let parts = versionString.split(separator: "-", maxSplits: 1)
             let core = parts.isEmpty ? "" : String(parts[0])
             isPrerelease = parts.count > 1
@@ -95,6 +95,12 @@ public enum UpdateChecker {
     /// — and two of them feed install-gating decisions where a divergence would
     /// be a silent correctness bug rather than a cosmetic one. See issue #69 (A1).
     ///
+    /// All three now call this function; no inline copies remain. If you add a
+    /// fourth site, route it through here too — the whole point of the
+    /// extraction is that this rule has exactly one definition. (`ParsedVersion`
+    /// kept its own copy until issue #73 (C5), which is precisely the silent
+    /// divergence this function exists to prevent.)
+    ///
     /// Only one leading `"v"` is stripped: `"vv1.0.0"` yields `"v1.0.0"`, which
     /// will then fail to match any real bundle version. That is intentional —
     /// a malformed tag should fail the comparison, not be coerced into passing.
@@ -115,7 +121,23 @@ public enum UpdateChecker {
     ///   - Beta pre-releases: `vMAJOR.MINOR.PATCH-beta.N`    (e.g. `v1.2.3-beta.4`)
     ///
     /// ❌ DO NOT add support for `rc.N`, `alpha.N`, or arbitrary pre-release labels.
-    /// See the full rationale in the source history (issue #17).
+    ///
+    /// `ParsedVersion` extracts a numeric ordinal only for a `beta.N` suffix;
+    /// every other label parses to `betaIndex == nil`. Two versions differing
+    /// only in an unrecognised suffix therefore compare equal here — `isNewer`
+    /// returns `false` in both directions — so `latestMatchingRelease`'s
+    /// `sorted(by:)` would order them arbitrarily and "the latest release"
+    /// would depend on the order GitHub happened to return them in.
+    ///
+    /// Supporting a second label shape also means defining precedence *between*
+    /// shapes (is `rc.1` newer than `beta.9`?), which is a semver question this
+    /// library deliberately declines to answer. Two tag shapes — stable and
+    /// `beta.N` — are the whole supported surface (Principle 5: unsupported is
+    /// correct).
+    ///
+    /// This previously cited issue #17 for "the full rationale". That issue is
+    /// about the fetch/compare layer boundary and never covered pre-release
+    /// labels, so the reasoning is restated here instead. See issue #73 (B3).
     public static func isNewer(_ candidate: String, than current: String) -> Bool { // skipcq: SW-R1002 — reviewed; complexity acceptable for this semver comparison
         let cv = ParsedVersion(candidate)
         let sv = ParsedVersion(current)

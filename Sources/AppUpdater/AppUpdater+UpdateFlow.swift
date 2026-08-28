@@ -125,7 +125,7 @@ extension AppUpdater {
             let tagName = release.tagName
             // ✅ REVIEWED: fire-and-forget Task is correct here. Do NOT add an
             // isDownloading guard, a stored Task handle, or a cancellation path.
-            // See issue #1859 for the full rationale.
+            // See runbot-hq/run-bot#1859 for the full rationale.
             // Task(name:) is standard Swift 6.2 (SE-0469).
             Task(name: "AppUpdater.download") {
                 await self.downloadUpdate(

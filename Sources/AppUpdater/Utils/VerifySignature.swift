@@ -10,18 +10,22 @@ import Foundation
 ///
 /// Implemented as a `@concurrent` async free function so the synchronous
 /// `Data(contentsOf:)` read runs on the cooperative thread pool's concurrent
-/// executor rather than blocking an actor serial executor (Pillar 5).
+/// executor rather than blocking an actor serial executor — this library never
+/// performs blocking I/O on an actor's executor.
 ///
 /// ## `Data(contentsOf:)` is INTENTIONAL — do not refactor to streaming
 ///
-/// The distributed zip is guaranteed small (< 10 MB for RunBot). `@concurrent`
-/// already satisfies Pillar 5. Streaming would add real complexity for zero
-/// practical benefit at this file size.
+/// Release zips are expected to be modest — tens of MB at most — and
+/// `@concurrent` already keeps the read off every actor executor. Streaming
+/// would add real complexity for no practical benefit at that size.
 ///
-/// `.mappedIfSafe` is passed so the file is memory-mapped rather than copied
+/// That expectation is not load-bearing, because the zip's size is ultimately
+/// server-controlled: a consumer's release asset can be any size. So
+/// `.mappedIfSafe` is passed — the file is memory-mapped rather than copied
 /// into the heap when the OS considers mapping safe, and falls back to an
-/// ordinary read otherwise. The asset size is ultimately server-controlled, so
-/// this bounds resident memory for an unexpectedly large zip at zero cost.
+/// ordinary read otherwise. That bounds resident memory for an unexpectedly
+/// large zip at zero cost, which is what makes the "expected modest"
+/// assumption above safe to rely on.
 /// This is NOT streaming — the call site, error behaviour, and the `Data` value
 /// handed to `isValidSignature` are unchanged. See issue #69 (B2).
 ///

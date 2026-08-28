@@ -6,11 +6,11 @@
 #if canImport(AppKit)
 import AppKit
 #else
-// This fatalError is intentionally a compile error on non-AppKit platforms
-// (a bare statement outside a declaration body does not compile in Swift).
-// That is the correct behaviour — it surfaces the problem at build time, not
-// at runtime. The package is macOS-only (platforms: [.macOS(.v14)]) so this
-// branch is structurally unreachable today.
+// The #error below is a compile-time diagnostic, not a runtime trap: without
+// AppKit this file fails to build rather than quietly compiling to nothing.
+// That is the correct behaviour — the problem surfaces at build time. The
+// package is macOS-only (platforms: [.macOS(.v14)]) so this branch is
+// structurally unreachable today.
 //
 // SPM UNIT TEST BOUNDARY: `swift test` runs in a headless process that cannot
 // import AppKit. The #if canImport(AppKit) guard above means none of this file's
@@ -29,8 +29,12 @@ import Foundation
 /// Background-scheduling logic for ``AppUpdater``.
 ///
 /// Guarded by `#if canImport(AppKit)` because `NSBackgroundActivityScheduler`
-/// lives in AppKit. On platforms without AppKit these entry points compile to
-/// no-ops so the library still builds.
+/// lives in AppKit. Without AppKit these entry points do **not** compile to
+/// no-ops: the `#else` above is an `#error`, so the build fails outright. That
+/// is deliberate — the package is macOS-only, and a silently inert scheduler
+/// would be worse than a build failure. The inner `#if` inside
+/// `scheduleBackgroundCheck` therefore can never evaluate false; it is kept as
+/// a local marker of where the AppKit dependency sits. See issue #73 (A7, C3).
 extension AppUpdater {
 
     /// Registers an `NSBackgroundActivityScheduler` that fires a full update
@@ -148,7 +152,7 @@ extension AppUpdater {
                     // (Principle 5: unsupported is correct). The .failed arm has a guard
                     // because a transient network failure is common; a release deletion
                     // mid-download is not. Adding the guard here is Principle 4 sprawl.
-                    // See issue #1859.
+                    // See runbot-hq/run-bot#1859.
                     state.apply(.idle)
 
                 case .failed(let error):
@@ -157,10 +161,15 @@ extension AppUpdater {
                     // visible in Console.app for triage. Without this, a 24-hour cycle
                     // failure is completely silent.
                     appUpdaterLogger.debug("background check failed: \(String(describing: error), privacy: .public)")
-                    // .failed here conflates genuine network failure, rate-limit (HTTP 429/403),
-                    // and auth errors — all map to .failed(.noReleasesFound) upstream. This is
-                    // a known accepted limitation; see UpdateCheckError.noReleasesFound in
-                    // UpdateChecker.swift for the full rationale and the tracking note.
+                    // The error carries a ReleaseFetchError that already distinguishes
+                    // network failure, HTTP status (429/403 rate-limit or auth), and
+                    // decode failure — see UpdateCheckError.fetchFailed in
+                    // UpdateModels.swift. Issue #31 introduced that split; the older
+                    // .noReleasesFound case this comment used to cite is deprecated.
+                    // This arm deliberately does not branch on the sub-case: every one
+                    // of them gets the same treatment here, and the distinction is
+                    // already logged above for triage. checkAndHandle logs each
+                    // sub-case separately on the foreground path.
                     // A transient failure must NOT clear a ready-to-install update.
                     switch state.currentPhase {
                     case .ready:

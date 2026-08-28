@@ -18,8 +18,12 @@ private final class Counter: @unchecked Sendable {
 /// Tests that verify `AppUpdater.checkAndHandle` drives host state correctly
 /// based on what `MockReleaseProvider` returns.
 ///
-/// Zero `DispatchQueue` usage (Pillar 5). All tests run on `@MainActor`
-/// because `AppUpdater` and `MockUpdateState` are both `@MainActor`.
+/// Zero `DispatchQueue` usage. All tests run on `@MainActor` because
+/// `AppUpdater` and `MockUpdateState` are both `@MainActor`.
+///
+/// Download URLs use the reserved `.invalid` TLD (RFC 2606): `checkAndHandle`
+/// reaches `handle`, which spawns a download `Task` unconditionally, so a
+/// routable host here would mean real requests. See issue #73 (D1).
 @MainActor
 @Suite("AppUpdater.checkAndHandle")
 struct AppUpdaterFetchTests {
@@ -68,7 +72,7 @@ struct AppUpdaterFetchTests {
     private func makeRelease(
         tagName: String = "v2.0.0"
     ) throws -> AvailableRelease {
-        let base = "https://example.com"
+        let base = "https://example.invalid"
         let asset = ReleaseAsset(
             name: "App.zip",
             browserDownloadURL: try #require(URL(string: "\(base)/App.zip"))
@@ -144,7 +148,7 @@ struct AppUpdaterFetchTests {
         _ = state
     }
 
-    // MARK: - Step 9: betaChannelProvider closure call timing
+    // MARK: - betaChannelProvider closure call timing
 
     /// Verifies the stored `betaChannelProvider` closure is invoked during
     /// `checkAndHandle` — not captured once at init. The counter increments

@@ -20,6 +20,12 @@ import Testing
 ///
 /// Download URLs use the reserved `.invalid` TLD (RFC 2606) so the
 /// fall-through paths cannot reach the real network.
+///
+/// Every test `defer`s removal of `zipURL.deletingLastPathComponent()` — the
+/// whole scheduler-scoped directory, not just the zip. `makeUpdater` gives each
+/// test a UUID-scoped `schedulerIdentifier`, so deleting the directory is safe
+/// and is what keeps a run from leaving empty directories behind in the
+/// developer's real `~/Library/Caches`.
 @MainActor
 @Suite("AppUpdater.handle cached-zip attribution")
 struct AppUpdaterCachedZipAttributionTests {
@@ -74,9 +80,6 @@ struct AppUpdaterCachedZipAttributionTests {
     @Test func staleZipFromEarlierRelease_isDiscardedAndRedownloaded() async throws {
         let (updater, state) = makeUpdater()
         let zipURL = try writeCachedZip(updater, contents: "the v1.1.0 zip")
-        // Remove the whole scheduler-scoped directory, not just the file — the
-        // identifier is UUID-scoped per test, so this leaves no residue in
-        // the developer's real ~/Library/Caches.
         defer { try? FileManager.default.removeItem(at: zipURL.deletingLastPathComponent()) }
 
         state.apply(.ready(version: "v1.1.0"))   // cached for the *previous* release
@@ -96,9 +99,6 @@ struct AppUpdaterCachedZipAttributionTests {
     @Test func leftoverZipAfterRestart_isDiscardedAndRedownloaded() async throws {
         let (updater, state) = makeUpdater()
         let zipURL = try writeCachedZip(updater, contents: "leftover from last session")
-        // Remove the whole scheduler-scoped directory, not just the file — the
-        // identifier is UUID-scoped per test, so this leaves no residue in
-        // the developer's real ~/Library/Caches.
         defer { try? FileManager.default.removeItem(at: zipURL.deletingLastPathComponent()) }
 
         // state.currentPhase is .idle — a fresh process has no phase history.
@@ -112,9 +112,6 @@ struct AppUpdaterCachedZipAttributionTests {
     @Test func failedPhase_doesNotAttributeCachedZip() async throws {
         let (updater, state) = makeUpdater()
         let zipURL = try writeCachedZip(updater, contents: "partial or unverified")
-        // Remove the whole scheduler-scoped directory, not just the file — the
-        // identifier is UUID-scoped per test, so this leaves no residue in
-        // the developer's real ~/Library/Caches.
         defer { try? FileManager.default.removeItem(at: zipURL.deletingLastPathComponent()) }
 
         state.apply(.failed(version: "v2.0.0"))
@@ -132,9 +129,6 @@ struct AppUpdaterCachedZipAttributionTests {
     @Test func readyForSameTag_reusesCachedZip() async throws {
         let (updater, state) = makeUpdater()
         let zipURL = try writeCachedZip(updater, contents: "the v2.0.0 zip")
-        // Remove the whole scheduler-scoped directory, not just the file — the
-        // identifier is UUID-scoped per test, so this leaves no residue in
-        // the developer's real ~/Library/Caches.
         defer { try? FileManager.default.removeItem(at: zipURL.deletingLastPathComponent()) }
 
         state.apply(.ready(version: "v2.0.0"))
@@ -157,9 +151,6 @@ struct AppUpdaterCachedZipAttributionTests {
     @Test func postRelaunchLeftover_appliesIdleAndKeepsIssue58Behaviour() async throws {
         let (updater, state) = makeUpdater(currentVersion: "2.0.0")
         let zipURL = try writeCachedZip(updater, contents: "just installed")
-        // Remove the whole scheduler-scoped directory, not just the file — the
-        // identifier is UUID-scoped per test, so this leaves no residue in
-        // the developer's real ~/Library/Caches.
         defer { try? FileManager.default.removeItem(at: zipURL.deletingLastPathComponent()) }
 
         await updater.handle(try release(tagName: "v2.0.0"), state: state)

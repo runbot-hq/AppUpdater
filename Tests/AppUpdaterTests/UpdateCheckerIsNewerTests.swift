@@ -7,9 +7,24 @@ import Testing
 
 /// Single comparison-contract test for `UpdateChecker.isNewer(_:than:)`.
 ///
-/// All semver dimensions (major/minor/patch ordering, numeric vs lexicographic,
-/// v-prefix stripping, stable-vs-prerelease precedence, beta ordering, partial
-/// and malformed versions) are covered as data-driven cases in one loop.
+/// Covered as data-driven cases in one loop: major/minor/patch ordering,
+/// numeric vs lexicographic comparison, v-prefix stripping,
+/// stable-vs-prerelease precedence, `beta.N` ordering, and partial or
+/// malformed versions.
+///
+/// ## Deliberately **not** covered — two known open bugs
+///
+/// - **Build metadata.** `v1.2.3+build.7` parses as `1.2.7`, because
+///   `ParsedVersion` splits the core on `"."` and `compactMap`s to `Int`,
+///   which silently drops `"3+build"` and shifts `7` into the patch position.
+///   Issue #69 (A3).
+/// - **Ordering transitivity.** `isNewer` is not a strict weak ordering, so
+///   `sorted(by: isNewer)` in `latestMatchingRelease` can return different
+///   winners for different input orderings of the same tags. Issue #69 (A4).
+///
+/// Both belong in this matrix once fixed. They are named here so this doc is
+/// not read as a claim of complete coverage — it previously said "all semver
+/// dimensions", which these two contradict. See issue #73 (D2).
 @Suite("UpdateChecker.isNewer")
 struct UpdateCheckerIsNewerTests {
 

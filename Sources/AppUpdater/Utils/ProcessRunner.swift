@@ -6,14 +6,14 @@ import Foundation
 
 /// Runs a command and returns `true` on exit code 0, `false` otherwise.
 ///
-/// Used for `ditto` (unzip and bundle replacement) which is short-lived and
-/// does not need streaming output.
+/// The only production call site is `/usr/bin/ditto -xk` in
+/// `unzipAndLocateApp`, which is short-lived and does not need streaming
+/// output. `AppUpdaterSignatureTests` also drives `openssl` through it — see
+/// the stderr note below for why that remains safe.
 ///
 /// ## Why this is a free function, not an `AppUpdater` method
 ///
 /// `runCommand` is a module-level free function, not an extension on `AppUpdater`.
-/// The file is named `AppUpdater+ProcessHelper.swift` for co-location only —
-/// the `+` prefix is a RunBot convention meaning "related to", not "owned by".
 /// A free function is the correct shape here because:
 /// - The function has no dependency on `AppUpdater` state (no `self` needed).
 /// - `@concurrent` cannot be applied to instance methods on a `@MainActor` class
@@ -27,14 +27,15 @@ import Foundation
 ///
 /// This is a `@concurrent` async free function, so its synchronous body
 /// (`process.run()` + `waitUntilExit()`) runs on the cooperative thread pool's
-/// concurrent executor, never on an actor serial executor (Pillar 5,
-/// `docs/architecture/concurrency-overview.md`). The previous implementation
-/// wrapped the work in `withCheckedContinuation` + `DispatchQueue.global` to
-/// hop off the main thread; `@concurrent` expresses the same intent directly and
-/// removes the manual GCD plumbing.
+/// concurrent executor, never on an actor serial executor. That is the rule
+/// throughout this library: blocking work never runs on an actor's executor,
+/// and no new `DispatchQueue` bridges are introduced. The previous
+/// implementation wrapped the work in `withCheckedContinuation` +
+/// `DispatchQueue.global` to hop off the main thread; `@concurrent` expresses
+/// the same intent directly and removes the manual GCD plumbing.
 ///
 /// The tradeoff: `waitUntilExit()` holds one cooperative-pool thread for the
-/// lifetime of the subprocess (~1–2 s for `ditto`). For a two-call sequence that
+/// lifetime of the subprocess (~1–2 s for `ditto`). For a single call that
 /// runs once per update cycle this is completely acceptable; there is no
 /// scenario where many concurrent `ditto` invocations would exhaust the pool
 /// (`isInstalling` serialises the install path).
@@ -42,8 +43,9 @@ import Foundation
 /// ## Why stderr is captured (not discarded)
 ///
 /// Routing stderr to `nullDevice` made `ditto` failures completely silent: the
-/// install path would fail, `updateActionFailed` would flip to `true`, and the
-/// user would see a "Download" fallback with no indication of what went wrong.
+/// install path would fail, the host would be driven to `.failed(version:)`,
+/// and the user would see a failure affordance with no indication of what went
+/// wrong.
 /// Stderr is now piped and logged at error level on failure so that Console.app
 /// and crash reports contain actionable information. Stdout remains discarded —
 /// `ditto` produces no useful stdout.
@@ -69,9 +71,15 @@ import Foundation
 ///
 /// REVIEWER: Do NOT refactor this to a concurrent stderr drain on the basis of
 /// a generic pipe-deadlock warning. The warning does not apply to `ditto`.
-/// This has been reviewed and confirmed safe. If `runCommand` is ever extended
-/// to run an executable that produces large stderr output, add the concurrent
-/// drain at that point and update this comment.
+/// This has been reviewed and confirmed safe.
+///
+/// `AppUpdaterSignatureTests` also runs `openssl genpkey` and
+/// `openssl pkeyutl -sign` through this function. Both are silent on stderr in
+/// the success path and emit a single short line on failure, so the reasoning
+/// above holds for them too. If `runCommand` is ever pointed at an executable
+/// that *does* produce large stderr output, add the concurrent drain at that
+/// point and update this comment — `Bundle+CodeSign.swift` has the
+/// drain-first shape to copy.
 @concurrent
 func runCommand(_ executable: String, args: [String]) async -> Bool {
     let process = Process()

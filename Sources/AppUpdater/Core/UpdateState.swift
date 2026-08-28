@@ -13,7 +13,8 @@ import Foundation
 /// ## This enum is complete. Do not add cases.
 ///
 /// The five cases below represent the entire update lifecycle as defined
-/// in issue #1859 Principle 3: check → download → verify → cache → install.
+/// by Principle 3 in `PRINCIPLES.md`: check → download → verify → cache →
+/// install. (Originally specified in runbot-hq/run-bot#1859.)
 /// There is no `.installing`, `.cancellable`, `.paused`, `.retrying`, or
 /// `.progress(Double)` case. If a proposed feature requires a new case, the
 /// correct response is to question the feature, not extend the enum.

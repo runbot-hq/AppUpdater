@@ -27,13 +27,13 @@ private struct ExternalProvider: ReleaseProvider {
     ) async -> ReleaseFetchResult {
         let asset = ReleaseAsset(
             name: assetName(tagName),
-            browserDownloadURL: URL(string: "https://example.com/\(assetName(tagName))")!
+            browserDownloadURL: URL(string: "https://example.invalid/\(assetName(tagName))")!
         )
         return .fetched(
             AvailableRelease(
                 tagName: tagName,
                 assets: [asset],
-                signatureURL: URL(string: "https://example.com/\(assetName(tagName)).sig")!
+                signatureURL: URL(string: "https://example.invalid/\(assetName(tagName)).sig")!
             )
         )
     }
@@ -50,12 +50,12 @@ struct PublicModelInitTests {
     @Test func publicInitsAssignVerbatim() throws {
         let asset = ReleaseAsset(
             name: "App.zip",
-            browserDownloadURL: try #require(URL(string: "https://example.com/App.zip"))
+            browserDownloadURL: try #require(URL(string: "https://example.invalid/App.zip"))
         )
         let release = AvailableRelease(
             tagName: "v1.2.3-beta.4",
             assets: [asset],
-            signatureURL: try #require(URL(string: "https://example.com/App.zip.sig"))
+            signatureURL: try #require(URL(string: "https://example.invalid/App.zip.sig"))
         )
 
         #expect(release.tagName == "v1.2.3-beta.4", "tagName must not be normalised")
