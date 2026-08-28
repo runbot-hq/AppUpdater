@@ -20,20 +20,43 @@ extension AppUpdater {
     /// relaunches the new version.
     ///
     /// ## Flow
-    /// 1. Verify host is in `.ready` phase and extract zip URL + version.
-    /// 2. Re-validate the cached version against GitHub (yank-revalidation).
-    /// 3. Unzip into a temporary directory via `/usr/bin/ditto`.
-    /// 4. (Optional) Verify `codesign` identity if `skipCodeSignValidation` is `false`.
-    /// 5. Verify the *unzipped* bundle's version matches the expected tag —
-    ///    before anything touches the running bundle (issue #69, A1).
-    /// 6. Replace the running bundle via `FileManager.replaceItemAt` (atomic swap).
-    /// 7. Re-verify the swapped bundle's version as defence in depth.
-    /// 8. Delete the zip (swap verified — zip is spent).
-    /// 9. Relaunch the new binary via `NSWorkspace.openApplication` with a completion handler.
-    /// 10. Terminate this process via `NSApp.terminate` inside the relaunch completion handler.
+    ///
+    /// This function performs the first four items itself and then hands off to
+    /// `replaceAndRelaunch`. That function marks its own body with `── Step N`
+    /// comments; those numbers are repeated here so the doc and the code agree
+    /// when read side by side. See issue #73 (C2) — the two used to disagree by
+    /// four.
+    ///
+    /// - Verify the host is in `.ready` phase and extract the version.
+    /// - Re-validate the cached version against GitHub (yank-revalidation).
+    /// - Unzip into a temporary directory via `/usr/bin/ditto`.
+    /// - (Optional) Verify `codesign` identity if `skipCodeSignValidation` is `false`.
+    /// - **Step 0** — verify the *unzipped* bundle's version matches the expected
+    ///   tag, before anything touches the running bundle (issue #69, A1).
+    /// - **Step 1** — replace the running bundle via `FileManager.replaceItemAt`
+    ///   (atomic swap).
+    /// - **Step 2** — remove the temporary unzip directory.
+    /// - **Step 3** — re-verify the swapped bundle's version as defence in depth.
+    /// - **Step 4** — delete the zip (swap verified — zip is spent).
+    /// - **Step 5** — relaunch via `NSWorkspace.openApplication`, then terminate
+    ///   this process via `NSApp.terminate` inside the relaunch completion handler.
     ///
     /// On any failure `state.apply(.failed(version:))` is called and the
     /// function returns without terminating.
+    ///
+    /// ## ⚠️ This function returns before the install has happened
+    ///
+    /// Everything from the unzip onwards runs inside a `Task` created here, so
+    /// `await installAndRelaunch(state:)` returns once that `Task` has been
+    /// spawned — not when the bundle has been swapped, and not when the relaunch
+    /// has completed. Awaiting this call tells you nothing about the outcome.
+    ///
+    /// The outcome is observable only through `state`: the phase stays `.ready`
+    /// while the install runs, and the host then sees either `.failed(version:)`
+    /// or process termination. ❌ Do NOT write
+    /// `await updater.installAndRelaunch(state:)` followed by code that assumes
+    /// the update was applied. Whether this should instead await the install is
+    /// tracked as issue #69 (D2); this note documents what it does today.
     @MainActor
     public func installAndRelaunch(state: any UpdateStateProviding) async {
         guard !isInstalling else { return }
@@ -63,7 +86,7 @@ extension AppUpdater {
         if skipCodeSignValidation {
             appUpdaterLogger.warning("""
                 skipCodeSignValidation is true — code-sign identity check is disabled; \
-                install proceeds on SHA-256 integrity alone
+                install proceeds on Ed25519 signature verification alone
                 """)
         }
 
@@ -315,6 +338,13 @@ extension AppUpdater {
         // ── Steps 3–5: verify, delete zip, relaunch ───────────────────────────
         // All three steps share one #if block — verification, zip deletion, and
         // relaunch form one logical unit. Do NOT split into separate #if blocks.
+        //
+        // This guard can never evaluate false: the #else at the top of this file
+        // is an #error, so without AppKit the file does not compile at all. It is
+        // kept as a local marker of where the AppKit dependency actually sits, so
+        // the block still reads correctly if the file-level #error is ever
+        // relaxed. The same is true of the guards around the codesign check in
+        // installAndRelaunch and around the body of relaunchApp. See issue #73 (C3).
         #if canImport(AppKit)
 
         // ── Step 3: post-swap version verification ────────────────────────────

@@ -33,8 +33,9 @@ public enum ReleaseFetchResult: Sendable {
 /// one method returning a `ReleaseFetchResult`. `AppUpdater` owns
 /// the `isNewer` comparison; this type only fetches.
 ///
-/// Conforming types must be `Sendable` (Pillar 6 — non-isolated
-/// `Sendable` structs for business logic).
+/// Conforming types must be `Sendable`. Business logic in this library is
+/// expressed as non-isolated `Sendable` value types rather than actors, so a
+/// provider can be called from any isolation domain without an actor hop.
 ///
 /// ## Production conformance
 /// `GitHubReleaseProvider` is the default production implementation.

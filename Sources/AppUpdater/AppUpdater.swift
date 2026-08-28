@@ -20,9 +20,10 @@ import AppKit
 ///
 /// The class is `@MainActor`, so `isInstalling` and the scheduler reference are
 /// race-free without extra locking. The blocking work runs off the main thread
-/// regardless: `URLSession` downloads suspend rather than block, checksum
-/// verification runs in the `@concurrent` `verifySignature` free function, and
-/// subprocess launches run in the `@concurrent` `runCommand` helper.
+/// regardless: `URLSession` downloads suspend rather than block, Ed25519
+/// signature verification runs in the `@concurrent` `verifySignature` free
+/// function, and subprocess launches run in the `@concurrent` `runCommand`
+/// helper.
 ///
 /// ## Typical usage
 ///
@@ -83,10 +84,10 @@ public final class AppUpdater {
     /// no accumulation of old zips. The file is at:
     /// `~/Library/Caches/<schedulerIdentifier>/update.zip`
     ///
-    /// Because the path is fixed, `purgeStaleZips` is no longer needed and
-    /// `UserDefaults` is no longer used for zip-path persistence. The zip either
-    /// exists at this path (install affordance available) or it doesn't (check
-    /// + download needed).
+    /// Because the path is fixed there is no cleanup pass to run and no zip
+    /// path persisted anywhere (Principle 7 — UserDefaults is not state). The
+    /// zip either exists at this path (install affordance available) or it
+    /// doesn't (check + download needed).
     ///
     /// ## Why this is a computed property, not a `lazy let`
     ///
@@ -296,7 +297,15 @@ public final class AppUpdater {
         // not an oversight.
         // (See also the `publicKey` property doc-comment above for the rationale
         // on storing as `Data` and parsing per-download.)
-        precondition(publicKey.count == 32, "AppUpdater: publicKey must be exactly 32 bytes (raw Ed25519 public key) — see README Key pair setup for how to derive this from public.pem")
+        precondition(
+            publicKey.count == 32,
+            """
+            AppUpdater: publicKey must be exactly 32 bytes (raw Ed25519 public key). \
+            See README § Key pair setup — the raw key is public.key, produced by \
+            `openssl pkey -in private.pem -pubout -outform DER | tail -c 32`. \
+            It is not the PEM-armoured public.pem, which will fail this same check.
+            """
+        )
         self.repo = repo
         self.currentVersion = currentVersion
         self.assetName = assetName

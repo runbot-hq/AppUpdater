@@ -15,9 +15,9 @@ import Foundation
 /// independently testable and can be called with any bundle — both the running
 /// bundle (`Bundle.main`) and the freshly unzipped candidate bundle.
 ///
-/// ## Deviation from plan issue #1821
+/// ## Deviation from plan runbot-hq/run-bot#1821
 ///
-/// Issue #1821 (phase 4f) specified "confirm no codesign or SecCode calls are
+/// That issue (phase 4f) specified "confirm no codesign or SecCode calls are
 /// present." This file adds a `codesign -dvvv` subprocess path — that is an
 /// intentional deviation, tracked here rather than in the issue.
 ///
@@ -38,10 +38,11 @@ extension Bundle {
     /// if the bundle is unsigned or the `codesign` invocation fails.
     ///
     /// Runs `codesign -dvvv <bundlePath>`, captures its stderr output (where
-    /// codesign writes its verbose output), and extracts all `Authority=` lines.
-    /// The result is the first `Authority=` value — typically the leaf
-    /// certificate common name (e.g. `"Developer ID Application: Acme Corp (XXXXXXXX)"`)
-    /// — which uniquely identifies the signing identity.
+    /// codesign writes its verbose output), and returns the value of the
+    /// **first** `Authority=` line — typically the leaf certificate common name
+    /// (e.g. `"Developer ID Application: Acme Corp (XXXXXXXX)"`), which uniquely
+    /// identifies the signing identity. Subsequent `Authority=` lines describe
+    /// the rest of the trust chain and are not read.
     ///
     /// ## Why stderr, not stdout
     ///
@@ -52,8 +53,8 @@ extension Bundle {
     /// ## Why `@concurrent`
     ///
     /// `codesign` is a short-lived subprocess (~50 ms). Running it `@concurrent`
-    /// keeps the blocking `waitUntilExit()` call off every actor serial executor
-    /// (Pillar 5 — no new `DispatchQueue` bridges). This mirrors `runCommand`
+    /// keeps the blocking `waitUntilExit()` call off every actor serial
+    /// executor, with no new `DispatchQueue` bridges. This mirrors `runCommand`
     /// in `ProcessRunner.swift`.
     ///
     /// ## Pipe drain ordering — differs from runCommand
@@ -150,11 +151,16 @@ extension Bundle {
     }
 }
 #else
-// This fatalError is intentionally a compile error on non-AppKit platforms
-// (a bare statement outside a declaration body does not compile in Swift).
-// That is the correct behaviour — it surfaces the problem at build time, not
-// at runtime. The package is macOS-only (platforms: [.macOS(.v14)]) so this
-// branch is structurally unreachable today.
+// The #error below is a compile-time diagnostic, not a runtime trap: without
+// AppKit this file fails to build rather than quietly compiling to nothing.
+// That is the correct behaviour — the problem surfaces at build time. The
+// package is macOS-only (platforms: [.macOS(.v14)]) so this branch is
+// structurally unreachable today.
+//
+// Note that this file uses no AppKit API of its own: it imports only Foundation
+// and drives `codesign` through Process/Pipe. It is gated on AppKit because
+// that gate is what keeps it out of the headless SPM test bundle, which is the
+// real constraint — see issue #73 (C4).
 //
 // SPM UNIT TEST BOUNDARY: `swift test` runs in a headless process that cannot
 // import AppKit. The #if canImport(AppKit) guard above means none of this file's
@@ -164,5 +170,5 @@ extension Bundle {
 // add stub logic here.
 //
 // swiftlint:disable:next line_length
-#error("AppUpdater requires AppKit. If you are hitting this from `swift test`: this code path touches AppKit and cannot be exercised in the SPM headless test runner. Do not test it. Do not add an #else branch with stub logic. Mock above the AppKit boundary instead.")
+#error("AppUpdater's code-sign helper is excluded from non-AppKit builds. If you are hitting this from `swift test`: this file is deliberately kept out of the SPM headless test bundle. Do not test it. Do not add an #else branch with stub logic. Mock above the AppKit boundary instead.")
 #endif

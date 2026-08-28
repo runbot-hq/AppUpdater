@@ -1,5 +1,5 @@
 // AppUpdaterCheckForUpdateTests.swift
-// AppUpdater
+// AppUpdaterTests
 import Foundation
 import Testing
 @testable import AppUpdater

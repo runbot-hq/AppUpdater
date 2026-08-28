@@ -4,7 +4,8 @@ import Foundation
 
 // MARK: - Download
 
-/// Download, checksum verification, and local cache management for AppUpdater.
+/// Download, Ed25519 signature verification, and local cache management for
+/// AppUpdater.
 extension AppUpdater {
 
     /// Downloads the zip and its Ed25519 `.sig` sidecar in parallel, verifies
@@ -150,12 +151,13 @@ extension AppUpdater {
 
             // ── Move verified zip to fixed destination ───────────────────────
             // destination is the URL snapshotted in handle() — same path used
-            // for the step-1 existence check. No divergence possible.
+            // for the cached-zip existence check. No divergence possible.
             // Wipe any partial file from a prior interrupted download before
             // moving the verified zip into place. This is the only cleanup
             // needed — no separate purge step, no version sidecar. The
-            // partial-write defence is here, not in handle(). See the
-            // ✅ REVIEWED note in AppUpdater+UpdateFlow.swift handle() step 1.
+            // partial-write defence lives here rather than in handle(), whose
+            // only job for an existing zip is deciding whether it is
+            // attributable to this release — see handleCachedZip.
             try FileManager.default.createDirectory(
                 at: destination.deletingLastPathComponent(),
                 withIntermediateDirectories: true

@@ -20,10 +20,15 @@ struct AppUpdaterSignatureTests {
     // MARK: - Test vectors
     //
     // Generated with:
+    //   let hex = { (d: Data) in d.map { String(format: "%02x", $0) }.joined() }
     //   let priv = Curve25519.Signing.PrivateKey()
     //   let sig  = try priv.signature(for: Data("hello world".utf8))
-    //   print(priv.publicKey.rawRepresentation.hexString)
-    //   print(sig.hexString)
+    //   print(hex(priv.publicKey.rawRepresentation))
+    //   print(hex(Data(sig)))
+    //
+    // The `hex` closure is spelled out because there is no `hexString` helper in
+    // this package — the recipe previously called one and could not be run as
+    // written. `data(fromHex:)` below is its inverse. See issue #73 (D5).
     //
     // Payload: "hello world" (UTF-8)
 

@@ -7,8 +7,8 @@
 /// A configurable test double for `ReleaseProvider`.
 ///
 /// `actor` isolation ensures mutation of call-capture properties is safe
-/// when tests `await` recorded values — no `@unchecked Sendable` required
-/// (Pillar 6). Zero `DispatchQueue` usage (Pillar 5).
+/// when tests `await` recorded values — no `@unchecked Sendable` required.
+/// Zero `DispatchQueue` usage.
 ///
 /// ## Usage
 ///
@@ -56,7 +56,14 @@ actor MockReleaseProvider: ReleaseProvider {
         }
     }
 
-    /// Convenience: number of simulated async yield points per fetch call.
+    /// Number of `Task.yield()` calls `fetchLatestRelease` performs before
+    /// returning, letting a test widen the suspension window in which other
+    /// `@MainActor` work can interleave with an in-flight check.
+    ///
+    /// No test currently sets this — the default of `1` is enough to make the
+    /// mock genuinely suspend rather than return synchronously, which is what
+    /// keeps it faithful to a real provider. Raise it when writing a test that
+    /// needs to act *during* a fetch. See issue #73 (D6).
     var simulatedSteps: Int = 1
 
     // MARK: - Call capture
@@ -82,6 +89,9 @@ actor MockReleaseProvider: ReleaseProvider {
         self.fetchResultToReturn = .fetched(releaseToReturn)
     }
 
+    /// Creates a mock returning an exact `ReleaseFetchResult` — use this to
+    /// simulate a `.failed` fetch, which the `AvailableRelease?` init cannot
+    /// express.
     init(fetchResultToReturn: ReleaseFetchResult) {
         self.fetchResultToReturn = fetchResultToReturn
     }

@@ -9,8 +9,17 @@ import Testing
 /// Tests that verify `AppUpdater.handle` state-machine behaviour via
 /// `MockUpdateState.currentPhase` / `appliedPhases`.
 ///
-/// Network I/O is avoided throughout:
-/// - "no matching asset" and "no signature URL" paths return before spawning
+/// Network I/O cannot happen here, and that is enforced by construction rather
+/// than by convention: every download URL uses the reserved `.invalid` TLD
+/// (RFC 2606), which has no authoritative name server. This matters because
+/// `handle` spawns its download `Task` unconditionally — the tests that reach
+/// the "asset present + signatureURL present" path *do* fire that Task and
+/// simply never observe it. These URLs previously named `example.com`, a
+/// routable host, so whether a request left the machine depended on the test
+/// process winning a race against its own teardown. See issue #73 (D1).
+///
+/// Per path:
+/// - "no matching asset" and "no signature URL" return before spawning
 ///   any download Task.
 /// - The "cached zip" path is exercised by writing a dummy file at
 ///   `updater.fixedZipURL` before calling `handle`.
@@ -47,7 +56,7 @@ struct AppUpdaterDownloadTests {
     private func releaseWithNilSignature(tagName: String = "v2.0.0") throws -> AvailableRelease {
         let asset = ReleaseAsset(
             name: "App.zip",
-            browserDownloadURL: try #require(URL(string: "https://example.com/App.zip"))
+            browserDownloadURL: try #require(URL(string: "https://example.invalid/App.zip"))
         )
         return AvailableRelease(tagName: tagName, assets: [asset], signatureURL: nil)
     }
@@ -60,7 +69,7 @@ struct AppUpdaterDownloadTests {
         let (updater, state) = makeUpdater()
         let asset = ReleaseAsset(
             name: "WrongName.zip",
-            browserDownloadURL: try #require(URL(string: "https://example.com/WrongName.zip"))
+            browserDownloadURL: try #require(URL(string: "https://example.invalid/WrongName.zip"))
         )
         let release = AvailableRelease(tagName: "v2.0.0", assets: [asset], signatureURL: nil)
 
@@ -101,16 +110,16 @@ struct AppUpdaterDownloadTests {
 
         let arm64Asset = ReleaseAsset(
             name: "App-arm64.zip",
-            browserDownloadURL: try #require(URL(string: "https://example.com/App-arm64.zip"))
+            browserDownloadURL: try #require(URL(string: "https://example.invalid/App-arm64.zip"))
         )
         let x86Asset = ReleaseAsset(
             name: "App-x86_64.zip",
-            browserDownloadURL: try #require(URL(string: "https://example.com/App-x86_64.zip"))
+            browserDownloadURL: try #require(URL(string: "https://example.invalid/App-x86_64.zip"))
         )
         let release = AvailableRelease(
             tagName: "v2.0.0",
             assets: [x86Asset, arm64Asset], // arm64 is second — order must not matter
-            signatureURL: URL(string: "https://example.com/App-arm64.zip.sig")
+            signatureURL: URL(string: "https://example.invalid/App-arm64.zip.sig")
         )
         await updater.handle(release, state: state)
 
@@ -130,17 +139,17 @@ struct AppUpdaterDownloadTests {
         let assets = [
             ReleaseAsset(
                 name: "App-x86_64.zip",
-                browserDownloadURL: try #require(URL(string: "https://example.com/App-x86_64.zip"))
+                browserDownloadURL: try #require(URL(string: "https://example.invalid/App-x86_64.zip"))
             ),
             ReleaseAsset(
                 name: "App-universal.zip",
-                browserDownloadURL: try #require(URL(string: "https://example.com/App-universal.zip"))
+                browserDownloadURL: try #require(URL(string: "https://example.invalid/App-universal.zip"))
             )
         ]
         let release = AvailableRelease(
             tagName: "v2.0.0",
             assets: assets,
-            signatureURL: URL(string: "https://example.com/App.sig")
+            signatureURL: URL(string: "https://example.invalid/App.sig")
         )
         await updater.handle(release, state: state)
 
@@ -209,12 +218,12 @@ struct AppUpdaterDownloadTests {
 
         let asset = ReleaseAsset(
             name: "App.zip",
-            browserDownloadURL: try #require(URL(string: "https://example.com/App.zip"))
+            browserDownloadURL: try #require(URL(string: "https://example.invalid/App.zip"))
         )
         let release = AvailableRelease(
             tagName: "v2.0.0",
             assets: [asset],
-            signatureURL: URL(string: "https://example.com/App.zip.sig")
+            signatureURL: URL(string: "https://example.invalid/App.zip.sig")
         )
         await updater.handle(release, state: state)
 
@@ -239,12 +248,12 @@ struct AppUpdaterDownloadTests {
 
         let asset = ReleaseAsset(
             name: "App.zip",
-            browserDownloadURL: try #require(URL(string: "https://example.com/App.zip"))
+            browserDownloadURL: try #require(URL(string: "https://example.invalid/App.zip"))
         )
         let release = AvailableRelease(
             tagName: "v2.0.0",
             assets: [asset],
-            signatureURL: URL(string: "https://example.com/App.zip.sig")
+            signatureURL: URL(string: "https://example.invalid/App.zip.sig")
         )
 
         await updater.handle(release, state: state)
