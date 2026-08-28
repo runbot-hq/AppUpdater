@@ -16,9 +16,10 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install SwiftLint
-        # Pinned: this job runs with --strict, so an upstream SwiftLint release
-        # that adds or tightens a rule would otherwise fail CI on an unrelated
-        # PR. Bump deliberately.
+        # NOT version-pinned yet. This job runs with --strict, so an upstream
+        # SwiftLint release that adds or tightens a rule fails CI on an unrelated
+        # PR. `swiftlint version` is printed so that breakage is at least
+        # diagnosable from the log. Real pinning is tracked as follow-up work.
         run: |
           brew install swiftlint
           swiftlint version
