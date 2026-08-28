@@ -7,7 +7,7 @@ distributed via GitHub Releases outside the Mac App Store.
 
 **Platform & Stack**
 
-![macOS 26+](https://img.shields.io/badge/macOS-26%2B-black?logo=apple&logoColor=white)
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black?logo=apple&logoColor=white)
 ![Swift 6.2](https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white)
 ![SPM](https://img.shields.io/badge/SPM-compatible-F05138?logo=swift&logoColor=white)
 
@@ -27,6 +27,7 @@ distributed via GitHub Releases outside the Mac App Store.
 - [Minimal host app](#minimal-host-app)
 - [Cache](#cache)
 - [Background check interval](#background-check-interval)
+- [Disabling automatic checks](#disabling-automatic-checks)
 - [Key pair setup](#key-pair-setup)
 - [Distribution assumptions](#distribution-assumptions)
 - [Trust model](#trust-model)
@@ -53,23 +54,23 @@ distributed via GitHub Releases outside the Mac App Store.
 Add the dependency to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/runbot-hq/run-bot", branch: "main"),
+.package(url: "https://github.com/runbot-hq/AppUpdater", branch: "main"),
 ```
 
 Then add the product to your target:
 
 ```swift
-.product(name: "AppUpdater", package: "run-bot")
+.product(name: "AppUpdater", package: "AppUpdater")
 ```
 
 > **Pin to a commit for reproducible builds.** For production use, pin to a specific commit SHA:
 > ```swift
-> .package(url: "https://github.com/runbot-hq/run-bot", revision: "<commit-sha>"),
+> .package(url: "https://github.com/runbot-hq/AppUpdater", revision: "<commit-sha>"),
 > ```
 
 ## Caveats
 
-- macOS 26+ only
+- macOS 14+ only
 - Sandboxed apps are not supported
 - GitHub Releases as the distribution source (no other providers)
 - No built-in UI — the host owns all update state and surfaces it however it likes
@@ -149,17 +150,46 @@ The verified zip is written to:
 ~/Library/Caches/<schedulerIdentifier>/update.zip
 ```
 
-The path is deterministic from `schedulerIdentifier` alone. The file is deleted at the start of each new download and on successful install.
+The path is deterministic from `schedulerIdentifier` alone. Any previous file at that path is removed at the *end* of a download — immediately before the freshly verified zip is moved into place — and the zip is deleted again after a successful install. A download that fails leaves the previously cached zip untouched.
 
 ## Background check interval
 
+`checkInterval` is injected at `init` and is immutable thereafter (`public let`)
+— there is no shared mutable state to reset between tests. Pass a custom cadence
+per instance:
+
 ```swift
-AppUpdater.checkInterval  // default: 86400 (24 hours)
+let updater = AppUpdater(
+    repo: "your-org/your-repo",
+    currentVersion: ...,
+    assetName: { _ in "YourApp.zip" },
+    publicKey: ...,
+    schedulerIdentifier: "com.your-org.update-check",
+    checkInterval: 6 * 60 * 60   // every 6 hours
+)
 ```
 
-Mutate before calling `scheduleBackgroundCheck` if you need a different cadence.
+The default is **86400 (24 hours) in release builds** and **60 seconds in DEBUG
+builds**.
 
-> **Test isolation:** Always restore the original value in a `tearDown` block when mutating `checkInterval` in a test — Swift Testing runs cases concurrently by default and a stale override will cause flaky failures.
+> **⚠️ The DEBUG default will exhaust GitHub's API rate limit.** Unauthenticated
+> requests are capped at 60 per hour per IP, and a 60-second interval issues
+> exactly 60 checks per hour. A debug session running longer than an hour will
+> saturate the quota for your whole IP. Pass an explicit `checkInterval` in debug
+> builds if you keep the app running.
+
+## Disabling automatic checks
+
+```swift
+updater.automaticUpdatesEnabled = false
+```
+
+`checkAndHandle` returns immediately while this is `false`, which covers every
+entry point — the launch-time check, any Settings-triggered check, and the
+background scheduler callback. The scheduler itself stays registered and its
+lifecycle is unaffected; it simply fires a check that exits early. Defaults to
+`true`. Set it from the host when the user toggles an automatic-updates
+preference.
 
 ## Key pair setup
 
@@ -291,6 +321,8 @@ Pre-release ordering currently supports only the `beta.N` suffix. See
 ## Known limitations
 
 **`beta.N` labels only** — pre-release ordering is supported only for `beta.N` suffixes (e.g. `v1.0.0-beta.2`). Any other suffix (`rc.1`, `alpha.1`) is treated as unordered and `isNewer` returns `false` when comparing against it.
+
+**100-release ceiling, no pagination** — `GitHubReleaseProvider` issues exactly one request with `per_page=100`. Releases beyond the first page (GitHub sorts newest-first) are never seen. This is not a problem for the normal case, where the newest release is always on page one, but a hotfix published to an old branch that lands past the 100th entry will be missed. Mitigation: keep the published release count at or below 100, or draft/delete old releases. Tracked in [#32](https://github.com/runbot-hq/AppUpdater/issues/32).
 
 ## Design principles
 

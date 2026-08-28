@@ -2,7 +2,7 @@
 // AppUpdater
 
 // AppKit is unavailable in the SPM headless test runner — this guard is
-// required for `swift test` even though the package is macOS(.v26)-only.
+// required for `swift test` even though the package is macOS(.v14)-only.
 #if canImport(AppKit)
 import Foundation
 
@@ -153,7 +153,7 @@ extension Bundle {
 // This fatalError is intentionally a compile error on non-AppKit platforms
 // (a bare statement outside a declaration body does not compile in Swift).
 // That is the correct behaviour — it surfaces the problem at build time, not
-// at runtime. The package is macOS-only (platforms: [.macOS(.v26)]) so this
+// at runtime. The package is macOS-only (platforms: [.macOS(.v14)]) so this
 // branch is structurally unreachable today.
 //
 // SPM UNIT TEST BOUNDARY: `swift test` runs in a headless process that cannot

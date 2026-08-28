@@ -16,3 +16,9 @@ jobs:
 
       - name: Run tests
         run: swift test
+
+      # The release configuration enables optimisation and whole-module builds,
+      # which surface diagnostics the debug build does not. Nothing guarded it
+      # before this job existed.
+      - name: Build release configuration
+        run: swift build -c release

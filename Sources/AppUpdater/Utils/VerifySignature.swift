@@ -18,6 +18,13 @@ import Foundation
 /// already satisfies Pillar 5. Streaming would add real complexity for zero
 /// practical benefit at this file size.
 ///
+/// `.mappedIfSafe` is passed so the file is memory-mapped rather than copied
+/// into the heap when the OS considers mapping safe, and falls back to an
+/// ordinary read otherwise. The asset size is ultimately server-controlled, so
+/// this bounds resident memory for an unexpectedly large zip at zero cost.
+/// This is NOT streaming — the call site, error behaviour, and the `Data` value
+/// handed to `isValidSignature` are unchanged. See issue #69 (B2).
+///
 /// ## Signature format
 ///
 /// `signatureBytes` must be the raw 64-byte Ed25519 signature produced by
@@ -45,7 +52,7 @@ import Foundation
 /// `.cannotDecodeContentData` — neither causes a silent pass.
 @concurrent
 func verifySignature(zipURL: URL, signatureBytes: Data, publicKeyBytes: Data) async throws {
-    let zipData = try Data(contentsOf: zipURL)
+    let zipData = try Data(contentsOf: zipURL, options: .mappedIfSafe)
 
     guard let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKeyBytes) else {
         appUpdaterLogger.error(
