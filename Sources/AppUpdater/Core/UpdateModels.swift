@@ -18,6 +18,21 @@ public struct ReleaseAsset: Decodable, Sendable {
         /// Maps to the GitHub API JSON key `"browser_download_url"`.
         case browserDownloadURL = "browser_download_url"
     }
+
+    /// Creates an asset descriptor.
+    ///
+    /// Public so that a third-party `ReleaseProvider` can construct the
+    /// `AvailableRelease` it returns. Swift's synthesised memberwise init is
+    /// `internal`, which made the `ReleaseProvider` protocol impossible to
+    /// conform to from outside the module — see issue #69 (D1).
+    ///
+    /// - Parameters:
+    ///   - name: The filename of the asset as it appears on the release page.
+    ///   - browserDownloadURL: The direct download URL for this asset.
+    public init(name: String, browserDownloadURL: URL) {
+        self.name = name
+        self.browserDownloadURL = browserDownloadURL
+    }
 }
 
 // MARK: - AvailableRelease
@@ -30,6 +45,31 @@ public struct AvailableRelease: Sendable {
     public let assets: [ReleaseAsset]
     /// The URL of the Ed25519 signature sidecar asset (`.sig`), or `nil` if absent.
     public let signatureURL: URL?
+
+    /// Creates a release descriptor.
+    ///
+    /// Public so that a third-party `ReleaseProvider` can construct the value it
+    /// returns in `ReleaseFetchResult.fetched(_:)`. Swift's synthesised
+    /// memberwise init is `internal`, which made the `ReleaseProvider` protocol
+    /// impossible to conform to from outside the module — see issue #69 (D1).
+    ///
+    /// ## ❌ DO NOT add normalisation to this initialiser
+    ///
+    /// This is a plain memberwise assignment and must stay one. `tagName` is
+    /// passed through verbatim (no `v`-stripping, no lowercasing, no trimming)
+    /// because `installAndRelaunch`'s yank-revalidation compares raw GitHub tag
+    /// strings for equality on both sides. See the format-parity note in
+    /// `GitHubReleaseProvider.fetchLatestRelease`.
+    ///
+    /// - Parameters:
+    ///   - tagName: The git tag of this release, verbatim.
+    ///   - assets: The binary assets attached to this release.
+    ///   - signatureURL: The `.sig` sidecar URL, or `nil` if absent.
+    public init(tagName: String, assets: [ReleaseAsset], signatureURL: URL?) {
+        self.tagName = tagName
+        self.assets = assets
+        self.signatureURL = signatureURL
+    }
 }
 
 // MARK: - UpdateCheckResult
@@ -41,7 +81,19 @@ public enum UpdateCheckResult: Sendable {
     /// A newer eligible release was found.
     case updateAvailable(release: AvailableRelease)
     /// The check could not complete due to the associated error.
-    case failed(Error)
+    ///
+    /// ❌ DO NOT revert the associated value type to bare `Error`.
+    ///
+    /// `UpdateCheckResult` is `Sendable`. A `Sendable` enum with a
+    /// non-`Sendable` associated value is a data race, and the compiler accepts
+    /// bare `Error` here silently rather than enforcing it — so the conformance
+    /// would be trusted rather than checked. This is the same reasoning already
+    /// documented on `ReleaseFetchError.networkError`; it simply had not been
+    /// applied to this enum. See issue #69 (D4).
+    ///
+    /// Every construction site produces `UpdateCheckError`, which is already
+    /// `Sendable`, so the constraint costs existing callers nothing.
+    case failed(any Error & Sendable)
 }
 
 // MARK: - ReleaseFetchError

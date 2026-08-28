@@ -52,8 +52,9 @@ public final class AppUpdater {
     /// Reverse-DNS identifier for the background scheduler; also used to scope
     /// this updater's cache directory under `~/Library/Caches`.
     ///
-    /// Must not be empty and must not contain `/` — both are enforced by
-    /// `precondition` at init time.
+    /// Must not be empty, must not contain `/`, and must not be a relative path
+    /// component (`.` or `..`) — all enforced by `precondition` at init time,
+    /// because this string is appended directly to the caches directory.
     public let schedulerIdentifier: String
 
     /// How often `NSBackgroundActivityScheduler` fires a background update check.
@@ -259,6 +260,17 @@ public final class AppUpdater {
         precondition(
             !schedulerIdentifier.contains("/"),
             "AppUpdater: schedulerIdentifier must not contain '/' — used as a cache directory name component"
+        )
+        // `..` (and `.`) are path components that escape or alias the caches
+        // directory rather than naming a subdirectory of it: an identifier of
+        // ".." resolves the zip path to ~/Library/update.zip. Rejecting them
+        // alongside "/" makes the "names a directory under caches" invariant
+        // complete. A reverse-DNS identifier — which is what
+        // NSBackgroundActivityScheduler requires anyway — is never "." or "..",
+        // so this cannot fire for a correctly configured host. See issue #69 (B4).
+        precondition(
+            schedulerIdentifier != "." && schedulerIdentifier != "..",
+            "AppUpdater: schedulerIdentifier must not be '.' or '..' — used as a cache directory name component"
         )
         // `precondition` (not `assert`) is intentional: a wrong-length key is a
         // programmer error that makes the updater non-functional from the start.

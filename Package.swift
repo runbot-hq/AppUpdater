@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "AppUpdater",
     platforms: [
-        .macOS(.v26)
+        .macOS(.v14)
     ],
     products: [
         .library(
@@ -24,9 +24,6 @@ let package = Package(
             name: "AppUpdaterTests",
             dependencies: ["AppUpdater"],
             path: "Tests/AppUpdaterTests",
-            resources: [
-                .copy("Fixtures")
-            ],
             swiftSettings: [
                 .enableUpcomingFeature("NonisolatedNonsendingByDefault")
             ]

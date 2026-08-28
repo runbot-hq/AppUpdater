@@ -8,14 +8,20 @@ on:
 jobs:
   swiftlint:
     name: SwiftLint
-    runs-on: macos-latest
+    # Pinned to the same image as the other workflows so all three jobs agree.
+    runs-on: macos-26
 
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install SwiftLint
-        run: brew install swiftlint
+        # Pinned: this job runs with --strict, so an upstream SwiftLint release
+        # that adds or tightens a rule would otherwise fail CI on an unrelated
+        # PR. Bump deliberately.
+        run: |
+          brew install swiftlint
+          swiftlint version
 
       - name: Run SwiftLint
         run: swiftlint lint --strict --reporter github-actions-logging

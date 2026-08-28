@@ -1,5 +1,11 @@
 .build/
+.swiftpm/
 *.o
 *.d
 *.dia
 .DS_Store
+
+# Ed25519 signing key material — never commit these.
+# The security model depends entirely on the private key staying secret.
+*.pem
+*.key

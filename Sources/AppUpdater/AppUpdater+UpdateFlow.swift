@@ -17,8 +17,24 @@ extension AppUpdater {
     /// this method directly). The scheduler lifecycle is not affected.
     ///
     /// On `.updateAvailable` the release is downloaded/cached via `handle`.
-    /// `.upToDate` is a no-op here — the background scheduler owns the
-    /// stale-row-clearing policy.
+    ///
+    /// `.upToDate` clears a stuck `.failed` phase and is otherwise a no-op.
+    /// The narrow `case .failed` guard is deliberate — do NOT widen it to an
+    /// unconditional `state.apply(.idle)`:
+    ///
+    /// - `.ready` must survive. A cached, verified, installable zip is not
+    ///   invalidated by a later check that finds nothing newer.
+    /// - `.available` / `.downloading` must survive. This method is re-entrant
+    ///   (launch check, Settings check, the README's Retry button) and a
+    ///   concurrent call must not wipe an in-flight download's phase.
+    ///
+    /// Only `.failed` is cleared, because only `.failed` is stuck: nothing else
+    /// in the flow ever leaves it, so a user who hits a transient network error
+    /// and then retries successfully would otherwise keep seeing the failure
+    /// affordance forever with no way to learn the app is up to date. The
+    /// background scheduler already clears state on `.upToDate`; this makes the
+    /// foreground path agree with it. See issue #69 (A2).
+    ///
     /// `.failed` logs a granular message per `ReleaseFetchError` sub-case so
     /// triage does not require a proxy or network capture to distinguish
     /// offline failures from API rejections.
@@ -31,6 +47,12 @@ extension AppUpdater {
             await handle(release, state: state)
         case .upToDate:
             appUpdaterLogger.debug("no update available (beta=\(beta, privacy: .public))")
+            // Clear a stuck .failed only — see the doc comment above for why
+            // this guard must stay narrow.
+            if case .failed = state.currentPhase {
+                appUpdaterLogger.debug("clearing stale .failed phase after a successful up-to-date check")
+                state.apply(.idle)
+            }
         case .failed(let error):
             switch error as? UpdateCheckError {
             case .fetchFailed(let reason):
