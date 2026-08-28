@@ -83,6 +83,28 @@ public enum UpdateChecker {
         }
     }
 
+    /// Converts a release tag to the `CFBundleShortVersionString` form by
+    /// stripping a single leading `"v"`.
+    ///
+    /// GitHub tags are conventionally `v`-prefixed (`"v0.7.7"`) while
+    /// `CFBundleShortVersionString` is not (`"0.7.7"`). Any comparison between
+    /// the two must go through this function.
+    ///
+    /// Extracted because the same expression was written inline in three
+    /// places — `handleCachedZip`, `replaceAndRelaunch`, and `ParsedVersion.init`
+    /// — and two of them feed install-gating decisions where a divergence would
+    /// be a silent correctness bug rather than a cosmetic one. See issue #69 (A1).
+    ///
+    /// Only one leading `"v"` is stripped: `"vv1.0.0"` yields `"v1.0.0"`, which
+    /// will then fail to match any real bundle version. That is intentional —
+    /// a malformed tag should fail the comparison, not be coerced into passing.
+    ///
+    /// - Parameter tagName: A release tag, e.g. `"v1.2.3"` or `"v1.2.3-beta.4"`.
+    /// - Returns: The tag without a leading `"v"`.
+    static func bundleVersion(forTag tagName: String) -> String {
+        tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
+    }
+
     /// Returns `true` when `candidate` is strictly newer than `current` using
     /// numeric semver comparison, including beta ordering.
     ///

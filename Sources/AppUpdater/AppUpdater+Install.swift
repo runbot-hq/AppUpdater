@@ -24,11 +24,13 @@ extension AppUpdater {
     /// 2. Re-validate the cached version against GitHub (yank-revalidation).
     /// 3. Unzip into a temporary directory via `/usr/bin/ditto`.
     /// 4. (Optional) Verify `codesign` identity if `skipCodeSignValidation` is `false`.
-    /// 5. Replace the running bundle via `FileManager.replaceItemAt` (atomic swap).
-    /// 6. Verify the swapped bundle's version matches the expected version.
-    /// 7. Delete the zip (swap verified — zip is spent).
-    /// 8. Relaunch the new binary via `NSWorkspace.openApplication` with a completion handler.
-    /// 9. Terminate this process via `NSApp.terminate` inside the relaunch completion handler.
+    /// 5. Verify the *unzipped* bundle's version matches the expected tag —
+    ///    before anything touches the running bundle (issue #69, A1).
+    /// 6. Replace the running bundle via `FileManager.replaceItemAt` (atomic swap).
+    /// 7. Re-verify the swapped bundle's version as defence in depth.
+    /// 8. Delete the zip (swap verified — zip is spent).
+    /// 9. Relaunch the new binary via `NSWorkspace.openApplication` with a completion handler.
+    /// 10. Terminate this process via `NSApp.terminate` inside the relaunch completion handler.
     ///
     /// On any failure `state.apply(.failed(version:))` is called and the
     /// function returns without terminating.
@@ -209,8 +211,14 @@ extension AppUpdater {
     /// mechanism that allows `@concurrent` to take effect.
     ///
     /// Returns `nil` if the plist is absent or the key is missing.
+    ///
+    /// Access level is `internal` (not `private`) deliberately: this is the
+    /// read that gates the pre-swap verification in `replaceAndRelaunch`, and
+    /// it is the one piece of that gate which can be exercised directly by
+    /// tests — it touches only the filesystem, never AppKit. `private` would
+    /// put it out of reach of `@testable import`. See issue #69 (A1).
     @concurrent
-    private func readBundleVersion(at bundleURL: URL) async -> String? {
+    func readBundleVersion(at bundleURL: URL) async -> String? {
         let infoPlistURL = bundleURL.appending(path: "Contents/Info.plist")
         let info = NSDictionary(contentsOf: infoPlistURL)
         return info?["CFBundleShortVersionString"] as? String
@@ -224,11 +232,30 @@ extension AppUpdater {
     /// `replaceItemAt` is atomic — on failure `bundleURL` is preserved exactly
     /// as it was. Do NOT replace with `removeItem + copyItem`.
     ///
-    /// ## Post-swap version verification
-    /// `replaceItemAt` not throwing is necessary but not sufficient. We read
-    /// `CFBundleShortVersionString` from the swapped bundle and compare it to
-    /// the expected tag (leading `v` stripped). Mismatch → `.failed`, no relaunch.
-    /// Fixes runbot-hq/run-bot#2193.
+    /// ## Version verification happens BEFORE the swap (Step 0)
+    ///
+    /// ❌ DO NOT move the Step 0 check back to after `replaceItemAt`, and do not
+    /// delete it as redundant with Step 3.
+    ///
+    /// The bytes at `zipURL` are not self-describing: nothing in the cache path
+    /// records which release they belong to, so a zip left over from an earlier
+    /// release can reach this function labelled with a newer tag (see the
+    /// attribution rules in `handleCachedZip`). Verifying only after the swap
+    /// was unrecoverable: `replaceItemAt` is called without
+    /// `.withoutDeletingBackupItem`, so by the time a mismatch is detected the
+    /// wrong bundle is installed and the original is gone. The phase went
+    /// `.failed`, Step 4 never ran, and the leftover zip re-triggered the same
+    /// mis-install on every subsequent cycle. See issue #69 (A1).
+    ///
+    /// Step 0 reads `CFBundleShortVersionString` from the *candidate* bundle in
+    /// `tmpDir` and refuses to swap on mismatch, which turns an unrecoverable
+    /// mis-install into a clean `.failed`.
+    ///
+    /// ## Post-swap version verification (Step 3)
+    /// Retained as defence in depth. With Step 0 in place this should be
+    /// unreachable — it now catches only a swap that silently produced
+    /// something other than the bundle we verified. Mismatch → `.failed`, no
+    /// relaunch. Originally added for runbot-hq/run-bot#2193.
     ///
     /// ## Why `NSWorkspace` instead of `open -n`
     /// `open -n` returns before the new process is up. `openApplication` calls
@@ -243,6 +270,28 @@ extension AppUpdater {
         state: any UpdateStateProviding
     ) async {
         let fm = FileManager.default
+        let expectedBundleVersion = UpdateChecker.bundleVersion(forTag: version)
+
+        // ── Step 0: pre-swap verification of the candidate bundle ─────────────
+        // Runs before anything mutates the running bundle. See the doc comment
+        // above for why this cannot be deferred to Step 3.
+        let candidateVersion = await readBundleVersion(at: appInZip)
+        guard candidateVersion == expectedBundleVersion else {
+            appUpdaterLogger.error("""
+                pre-swap verification failed: cached zip contains \
+                \(candidateVersion ?? "nil", privacy: .public) \
+                but was offered as \(expectedBundleVersion, privacy: .public) \
+                — refusing to swap, discarding the zip
+                """)
+            // The zip is provably not the release it was announced as, so it is
+            // deleted here rather than left to re-trigger the same failure on
+            // the next cycle. The next check re-downloads.
+            try? fm.removeItem(at: zipURL)
+            try? fm.removeItem(at: tmpDir)
+            isInstalling = false
+            state.apply(.failed(version: version))
+            return
+        }
 
         // ── Step 1: atomic bundle swap ────────────────────────────────────────
         let finalURL: URL
@@ -270,7 +319,6 @@ extension AppUpdater {
 
         // ── Step 3: post-swap version verification ────────────────────────────
         let swappedVersion = await readBundleVersion(at: finalURL)
-        let expectedBundleVersion = version.hasPrefix("v") ? String(version.dropFirst()) : version
         guard swappedVersion == expectedBundleVersion else {
             appUpdaterLogger.error("""
                 post-swap verification failed: \
@@ -279,6 +327,10 @@ extension AppUpdater {
                 at \(finalURL.path(percentEncoded: false), privacy: .public) \
                 — aborting relaunch
                 """)
+            // Delete the zip on this path too. Step 4 is skipped by this early
+            // return, and leaving the zip behind is what let the original A1
+            // failure repeat on every subsequent cycle.
+            try? fm.removeItem(at: zipURL)
             isInstalling = false
             state.apply(.failed(version: version))
             return

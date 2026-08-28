@@ -150,8 +150,16 @@ struct AppUpdaterDownloadTests {
 
     // MARK: - Cached zip fast-path → .ready
 
-    /// When a zip already exists at `fixedZipURL`, `handle` must advance
-    /// directly to `.ready` without spawning a download Task.
+    /// When a zip exists at `fixedZipURL` **and the phase attributes it to this
+    /// exact release**, `handle` must advance to `.ready` without spawning a
+    /// download Task.
+    ///
+    /// The `.ready(v2.0.0)` precondition is load-bearing and was added with
+    /// issue #69 (A1): before that, this test wrote three bytes of junk and
+    /// asserted `.ready(v2.0.0)` from an `.idle` start, which is precisely the
+    /// mis-attribution that let a stale zip be installed over the running app.
+    /// Attribution rules are covered in full by
+    /// `AppUpdaterCachedZipAttributionTests`.
     @Test func cachedZip_advancesToReady() async throws {
         let (updater, state) = makeUpdater()
         let zipURL = updater.fixedZipURL
@@ -160,16 +168,20 @@ struct AppUpdaterDownloadTests {
             withIntermediateDirectories: true
         )
         try Data("zip".utf8).write(to: zipURL)
-        defer { try? FileManager.default.removeItem(at: zipURL) }
+        defer { try? FileManager.default.removeItem(at: zipURL.deletingLastPathComponent()) }
+
+        // This is what AppUpdater itself applies after verifying and caching a
+        // download — it is the only attribution the zip has.
+        state.apply(.ready(version: "v2.0.0"))
 
         let asset = ReleaseAsset(
             name: "App.zip",
-            browserDownloadURL: try #require(URL(string: "https://example.com/App.zip"))
+            browserDownloadURL: try #require(URL(string: "https://example.invalid/App.zip"))
         )
         let release = AvailableRelease(
             tagName: "v2.0.0",
             assets: [asset],
-            signatureURL: URL(string: "https://example.com/App.zip.sig")
+            signatureURL: URL(string: "https://example.invalid/App.zip.sig")
         )
         await updater.handle(release, state: state)
 
@@ -178,7 +190,10 @@ struct AppUpdaterDownloadTests {
             return
         }
         #expect(version == "v2.0.0")
-        #expect(state.appliedPhases.count == 1)
+        #expect(
+            FileManager.default.fileExists(atPath: zipURL.path(percentEncoded: false)),
+            "an attributable zip must not be deleted"
+        )
     }
 
     // MARK: - Asset present + signatureURL present → .available then download

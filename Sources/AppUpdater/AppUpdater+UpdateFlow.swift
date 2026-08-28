@@ -92,16 +92,20 @@ extension AppUpdater {
 
     /// Responds to a newly discovered available release.
     ///
-    /// 1. If a zip already exists at the fixed zip URL, delegates to `handleCachedZip`
-    ///    which applies `.ready` or `.idle` (zip-deletion race guard, issue #58).
+    /// 1. If a zip already exists at the fixed zip URL, delegates to `handleCachedZip`,
+    ///    which either consumes it (`.ready` / `.idle`) or discards it as
+    ///    unattributable and returns `false` so the normal download runs.
     /// 2. If the release has no matching asset or no signature sidecar URL,
     ///    logs a warning and returns — no phase change.
     /// 3. Otherwise advances to `.available` and starts a background download.
     public func handle(_ release: AvailableRelease, state: any UpdateStateProviding) async {
         withZipURL { zipURL in
             if FileManager.default.fileExists(atPath: zipURL.path(percentEncoded: false)) {
-                handleCachedZip(release: release, state: state)
-                return
+                // false means the zip could not be attributed to this release and
+                // has been deleted — fall through and download it properly.
+                if handleCachedZip(release: release, state: state, zipURL: zipURL) {
+                    return
+                }
             }
 
             // ── Asset or signature sidecar absent? ─────────────────────────────────────────────────────
@@ -137,12 +141,42 @@ extension AppUpdater {
 
     // MARK: - Cached zip
 
-    /// Handles the case where a zip already exists on disk when `handle` is called.
+    /// Decides what to do with a zip that already exists on disk when `handle`
+    /// is called.
     ///
-    /// Applies `.ready` unless the cached release matches the currently running version,
-    /// in which case the zip is a post-relaunch leftover and `.idle` is applied instead.
+    /// - Returns: `true` if the zip was consumed (a phase was applied and the
+    ///   caller should stop), `false` if it could not be attributed to `release`
+    ///   and was deleted (the caller should download).
     ///
-    /// ## Zip-deletion race guard (issue #58)
+    /// ## The bytes on disk are not self-describing
+    ///
+    /// The cache path is fixed — `update.zip`, no version in the filename, no
+    /// sidecar — so nothing on disk says which release a cached zip belongs to.
+    /// The only trustworthy attribution is the in-memory phase: `AppUpdater`
+    /// applies `.ready(version:)` exactly once, immediately after verifying and
+    /// moving that specific download into place. So a zip is attributable to
+    /// `release` if and only if the host is currently in `.ready` for this exact
+    /// tag; anything else is a leftover and is discarded.
+    ///
+    /// This closes issue #69 (A1). Previously `.ready(release.tagName)` was
+    /// applied for whatever bytes happened to be present, so a zip downloaded
+    /// for an earlier release — a user who skipped an update, or who toggled the
+    /// beta channel off — was announced as the newer release and then installed
+    /// over the running app before anything checked it.
+    ///
+    /// ## ❌ This is still not a version sidecar
+    ///
+    /// The existing directive stands: do NOT add a version sidecar and do NOT
+    /// encode the version into the zip filename. This fix deliberately adds no
+    /// new state at all — it reads `UpdatePhase`, which already carries the
+    /// version, so Principles 1 and 7 are untouched.
+    ///
+    /// The cost is one extra download when the host restarts while a zip is
+    /// cached but uninstalled: the phase is `.idle` on a cold start, so the
+    /// leftover is unattributable by construction and is re-fetched. That is the
+    /// intended trade — a redundant download is cheap, a mis-install is not.
+    ///
+    /// ## Zip-deletion race guard (issue #58) — checked first
     /// After `installAndRelaunch`, the zip is deleted synchronously after swap
     /// verification but before relaunch (Step 4 in `replaceAndRelaunch`). The new
     /// process can still reach this point before deletion returns and find a zip on
@@ -151,24 +185,45 @@ extension AppUpdater {
     ///
     /// `currentVersion` is baked into `AppUpdater` at `init()` from `Bundle.main` of
     /// the running process — it is always authoritative regardless of what is on disk.
-    /// The comparison is race-free.
-    ///
-    /// The leading `"v"` is stripped from `release.tagName` to match the
-    /// `CFBundleShortVersionString` format used by `currentVersion`
-    /// (e.g. tagName `"v0.7.7"` → `"0.7.7"` == `currentVersion` `"0.7.7"`).
-    ///
-    /// ## Self-healing edge cases
-    /// STALE ZIP, YANKED RELEASE, and PARTIAL WRITE scenarios all self-heal without
-    /// a version sidecar or version-in-filename. See the inline comments in `handle`
-    /// (prior to this extraction) and PRINCIPLES.md for the full rationale.
-    /// Do NOT add a version sidecar or encode the version into the zip filename.
-    private func handleCachedZip(release: AvailableRelease, state: any UpdateStateProviding) {
-        let tagVersion = release.tagName.hasPrefix("v") ? String(release.tagName.dropFirst()) : release.tagName
+    /// The comparison is race-free. This guard runs before the attribution check
+    /// because it must win: the zip is spent either way, and `.idle` is the
+    /// correct phase, not a re-download.
+    private func handleCachedZip(
+        release: AvailableRelease,
+        state: any UpdateStateProviding,
+        zipURL: URL
+    ) -> Bool {
+        let tagVersion = UpdateChecker.bundleVersion(forTag: release.tagName)
         if tagVersion == currentVersion {
             appUpdaterLogger.debug("post-relaunch zip leftover detected: \(release.tagName, privacy: .public) matches running version — applying .idle (issue #58)")
             state.apply(.idle)
-            return
+            return true
         }
+
+        guard case .ready(let cachedVersion) = state.currentPhase,
+              cachedVersion == release.tagName else {
+            appUpdaterLogger.debug("""
+                cached zip is not attributable to \(release.tagName, privacy: .public) \
+                (phase is \(String(describing: state.currentPhase), privacy: .public)) \
+                — discarding and re-downloading (issue #69 A1)
+                """)
+            do {
+                try FileManager.default.removeItem(at: zipURL)
+            } catch {
+                let nsErr = error as NSError
+                if !(nsErr.domain == NSCocoaErrorDomain && nsErr.code == NSFileNoSuchFileError) {
+                    // Not fatal: downloadUpdate removes the destination again
+                    // before moving the verified zip into place.
+                    appUpdaterLogger.error("""
+                        could not delete unattributable zip, download will overwrite it: \
+                        \(String(describing: error), privacy: .public)
+                        """)
+                }
+            }
+            return false
+        }
+
         state.apply(.ready(version: release.tagName))
+        return true
     }
 }
