@@ -2,7 +2,7 @@
 // AppUpdater
 
 // AppKit is unavailable in the SPM headless test runner — this guard is
-// required for `swift test` even though the package is macOS(.v26)-only.
+// required for `swift test` even though the package is macOS(.v14)-only.
 #if canImport(AppKit)
 import AppKit
 #else
